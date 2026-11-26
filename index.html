@@ -10,6 +10,38 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0" />
     <script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbzrcVIR4PJRKdFRMasC1YC2AYnRR7tNyJrYOQCJ26xlzASS7pJ82xedb9sD-5E5H5Urvg/exec';
+
+// Client login example (replaces local login check in client.html)
+async function apiClientLogin(identifier, password) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'clientLogin', identifier, password })
+  });
+  return res.json();
+}
+
+// Client push update example (cap, pause, cool-time, feedback, or payment notice)
+async function apiClientUpdate(payload) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(Object.assign({ action: 'clientUpdate' }, payload))
+  });
+  return res.json();
+}
+
+// Management sync example (replaces saveState in index.html)
+async function apiAdminSaveDb(db, pin) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'adminSaveDb', db, pin })
+  });
+  return res.json();
+}
+        
         tailwind.config = {
             theme: {
                 extend: {
