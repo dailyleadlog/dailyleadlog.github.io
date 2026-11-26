@@ -10,38 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0" />
     <script>
-const API_URL = 'https://script.google.com/macros/s/AKfycbw-gVvdrP9TErZ5WvUvfpKdJNBCrs6qZrL9H9yM9q4lEB9EkjikCZ6bAW0LF-HEyyR1-g/exec';
+        const API_URL = 'https://script.google.com/macros/s/AKfycbw-gVvdrP9TErZ5WvUvfpKdJNBCrs6qZrL9H9yM9q4lEB9EkjikCZ6bAW0LF-HEyyR1-g/exec';
 
-// Client login example (replaces local login check in client.html)
-async function apiClientLogin(identifier, password) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'clientLogin', identifier, password })
-  });
-  return res.json();
-}
-
-// Client push update example (cap, pause, cool-time, feedback, or payment notice)
-async function apiClientUpdate(payload) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(Object.assign({ action: 'clientUpdate' }, payload))
-  });
-  return res.json();
-}
-
-// Management sync example (replaces saveState in index.html)
-async function apiAdminSaveDb(db, pin) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: 'adminSaveDb', db, pin })
-  });
-  return res.json();
-}
-        
         tailwind.config = {
             theme: {
                 extend: {
@@ -123,7 +93,7 @@ async function apiAdminSaveDb(db, pin) {
 
                 <div class="hidden sm:flex items-center gap-2 text-xs text-slate-300">
                     <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                    <span>Encrypted Lead Handoff</span>
+                    <span>Live Google Drive Sync</span>
                 </div>
             </div>
         </header>
@@ -155,7 +125,7 @@ async function apiAdminSaveDb(db, pin) {
                         </div>
                     </div>
 
-                    <button type="submit" class="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer">
+                    <button type="submit" id="client-login-submit-btn" class="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer">
                         <span class="material-symbols-outlined text-[18px]">login</span>
                         <span>Sign In</span>
                     </button>
@@ -180,11 +150,9 @@ async function apiAdminSaveDb(db, pin) {
     <!-- ===================================================================== -->
     <div id="portal-shell" class="hidden min-h-screen flex flex-col">
 
-        <!-- Header: Brand, Logged-In Client Name, State(s), Status Badge & Logout -->
         <header class="sticky top-0 z-40 bg-navy-900 text-white border-b border-slate-800 shadow-lg">
             <div class="max-w-[1360px] mx-auto px-4 sm:px-6">
                 <div class="flex justify-between items-center h-14 gap-3">
-                    <!-- Brand -->
                     <div class="flex items-center gap-2.5 shrink-0">
                         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-indigo-950">
                             <span class="material-symbols-outlined text-[20px]">verified_user</span>
@@ -192,16 +160,23 @@ async function apiAdminSaveDb(db, pin) {
                         <div class="flex items-center gap-2">
                             <span class="font-extrabold text-base sm:text-lg tracking-tight text-white">Daily Lead Log</span>
                             <span class="hidden md:inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">dailyleadlog.com</span>
+                            <span id="live-sync-pill" class="hidden lg:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Live Sync
+                            </span>
                         </div>
                     </div>
 
-                    <!-- Logged-In Client Identity + State(s) + Live Status Badge -->
                     <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                         <div class="flex items-center gap-2 bg-navy-950/80 border border-slate-800 px-3 py-1.5 rounded-full min-w-0">
                             <span id="hdr-client-name" class="text-xs sm:text-sm font-bold text-white truncate">Anthony Aguilar</span>
                             <span id="hdr-client-states" class="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 shrink-0">Texas</span>
                             <span id="hdr-status-badge" class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">Active</span>
                         </div>
+
+                        <button onclick="manualSyncNow()" title="Sync latest data from Google Drive" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-all shrink-0 cursor-pointer">
+                            <span class="material-symbols-outlined text-[16px]">sync</span>
+                            <span class="hidden sm:inline">Sync</span>
+                        </button>
 
                         <button onclick="logoutToBlankLogin()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-200 hover:text-white bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/30 transition-all shrink-0 cursor-pointer">
                             <span class="material-symbols-outlined text-[16px]">logout</span>
@@ -211,7 +186,6 @@ async function apiAdminSaveDb(db, pin) {
                 </div>
             </div>
 
-            <!-- Secondary Navigation Tabs -->
             <div class="bg-navy-850 border-t border-slate-800/90">
                 <div class="max-w-[1360px] mx-auto px-3 sm:px-6">
                     <nav class="flex items-center gap-1 py-1.5 overflow-x-auto no-scrollbar" aria-label="Client Workspace Navigation">
@@ -243,12 +217,9 @@ async function apiAdminSaveDb(db, pin) {
             </div>
         </header>
 
-        <!-- Main Content Container -->
         <main class="flex-grow max-w-[1360px] w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-            <!-- Top KPI Summary Cards (4 Required KPIs) -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <!-- KPI 1: Today's Leads -->
                 <div onclick="switchWorkspaceTab('controls')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-300 transition-all cursor-pointer">
                     <div class="flex items-center justify-between">
                         <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Today's Leads</span>
@@ -258,7 +229,6 @@ async function apiAdminSaveDb(db, pin) {
                     <p id="kpi-todays-leads-sub" class="text-xs text-slate-500 mt-1">Daily cap active • $30/lead</p>
                 </div>
 
-                <!-- KPI 2: Cool-Time Status -->
                 <div onclick="switchWorkspaceTab('controls')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-300 transition-all cursor-pointer">
                     <div class="flex items-center justify-between">
                         <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Cool-Time Status</span>
@@ -268,32 +238,27 @@ async function apiAdminSaveDb(db, pin) {
                     <p id="kpi-cool-sub" class="text-xs text-slate-500 mt-1">2-minute post-lead buffer</p>
                 </div>
 
-                <!-- KPI 3: Pending Balance -->
                 <div onclick="switchWorkspaceTab('invoices')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-300 transition-all cursor-pointer">
                     <div class="flex items-center justify-between">
                         <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Pending Balance</span>
                         <span class="material-symbols-outlined text-amber-600 bg-amber-50 p-1.5 rounded-lg">account_balance_wallet</span>
                     </div>
-                    <p id="kpi-pending-balance" class="text-2xl font-extrabold text-slate-900 mt-2">$150.00</p>
-                    <p id="kpi-pending-sub" class="text-xs text-amber-700 font-medium mt-1">1 open invoice</p>
+                    <p id="kpi-pending-balance" class="text-2xl font-extrabold text-slate-900 mt-2">$0.00</p>
+                    <p id="kpi-pending-sub" class="text-xs text-amber-700 font-medium mt-1">0 unpaid invoices</p>
                 </div>
 
-                <!-- KPI 4: Open Feedback / Disputes -->
                 <div onclick="switchWorkspaceTab('leads')" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs hover:border-indigo-300 transition-all cursor-pointer">
                     <div class="flex items-center justify-between">
                         <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Open Feedback / Disputes</span>
                         <span class="material-symbols-outlined text-rose-600 bg-rose-50 p-1.5 rounded-lg">rate_review</span>
                     </div>
-                    <p id="kpi-open-feedback" class="text-2xl font-extrabold text-slate-900 mt-2">1 Open</p>
+                    <p id="kpi-open-feedback" class="text-2xl font-extrabold text-slate-900 mt-2">0 Open</p>
                     <p id="kpi-open-feedback-sub" class="text-xs text-slate-500 mt-1">Pending review or replacement</p>
                 </div>
             </div>
 
-            <!-- =============================================================== -->
-            <!-- TAB 1: LIVE & PREVIOUS LEADS                                    -->
-            <!-- =============================================================== -->
+            <!-- TAB 1: LIVE & PREVIOUS LEADS -->
             <section id="ws-view-leads" class="animate-fade-in space-y-5">
-                <!-- Search & Status Filter Toolbar -->
                 <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
                     <div class="flex flex-wrap items-center gap-1.5">
                         <button onclick="setScopeFilter('ALL')" id="filter-scope-ALL" class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900 text-white cursor-pointer">
@@ -327,19 +292,12 @@ async function apiAdminSaveDb(db, pin) {
                     </div>
                 </div>
 
-                <!-- Leads Cards Container -->
-                <div id="client-leads-container" class="space-y-4">
-                    <!-- Populated via JS -->
-                </div>
+                <div id="client-leads-container" class="space-y-4"></div>
             </section>
 
-            <!-- =============================================================== -->
-            <!-- TAB 2: LINE & CAP CONTROLS                                      -->
-            <!-- =============================================================== -->
+            <!-- TAB 2: LINE & CAP CONTROLS -->
             <section id="ws-view-controls" class="hidden animate-fade-in space-y-6">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                    <!-- Card A: Active / Pause Receiving Leads -->
                     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col justify-between space-y-4">
                         <div class="space-y-3">
                             <div class="flex items-center justify-between">
@@ -367,7 +325,6 @@ async function apiAdminSaveDb(db, pin) {
                         </div>
                     </div>
 
-                    <!-- Card B: Live 2-Minute Cool-Time Countdown, Duration & Reset -->
                     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col justify-between space-y-4">
                         <div class="space-y-3">
                             <div class="flex items-center justify-between">
@@ -401,7 +358,6 @@ async function apiAdminSaveDb(db, pin) {
                         <p class="text-[11px] text-slate-400 pt-2 border-t border-slate-100">Default cool-time is 2 minutes after each received transfer.</p>
                     </div>
 
-                    <!-- Card C: Daily Cap Adjustment & One-Time Unlimited Leads Boost -->
                     <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col justify-between space-y-4">
                         <div class="space-y-3">
                             <div class="flex items-center justify-between">
@@ -411,7 +367,6 @@ async function apiAdminSaveDb(db, pin) {
                             <h2 class="text-lg font-bold text-slate-900">Daily Cap & Unlimited Boost</h2>
                             <p class="text-xs text-slate-500 leading-relaxed">Adjust your daily lead cap or activate a <strong>One-Time Unlimited Leads Boost</strong> to remove today's cap for a single day.</p>
 
-                            <!-- Daily Cap Adjuster -->
                             <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
                                 <div>
                                     <span class="block text-xs font-bold text-slate-800">Today's Daily Cap</span>
@@ -424,7 +379,6 @@ async function apiAdminSaveDb(db, pin) {
                                 </div>
                             </div>
 
-                            <!-- One-Time Unlimited Leads Boost Box -->
                             <div id="unlimited-boost-box" class="p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-2">
                                 <div class="flex items-center justify-between">
                                     <span class="text-xs font-extrabold text-indigo-950 flex items-center gap-1">
@@ -443,21 +397,15 @@ async function apiAdminSaveDb(db, pin) {
 
                         <p class="text-[11px] text-slate-400 pt-2 border-t border-slate-100">One-time unlimited applies to today's cap only.</p>
                     </div>
-
                 </div>
 
-                <!-- My Criteria & Routing Summary Card -->
                 <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
                     <h3 class="font-bold text-slate-900 text-sm mb-3">My Lead Qualification & Routing Criteria</h3>
-                    <div id="my-criteria-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                        <!-- Populated via JS -->
-                    </div>
+                    <div id="my-criteria-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs"></div>
                 </div>
             </section>
 
-            <!-- =============================================================== -->
-            <!-- TAB 3: INVOICES                                                 -->
-            <!-- =============================================================== -->
+            <!-- TAB 3: INVOICES -->
             <section id="ws-view-invoices" class="hidden animate-fade-in space-y-5">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
@@ -485,17 +433,13 @@ async function apiAdminSaveDb(db, pin) {
                                     <th class="py-3.5 px-4 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="client-invoices-tbody" class="divide-y divide-slate-100 text-sm">
-                                <!-- Populated via JS -->
-                            </tbody>
+                            <tbody id="client-invoices-tbody" class="divide-y divide-slate-100 text-sm"></tbody>
                         </table>
                     </div>
                 </div>
             </section>
 
-            <!-- =============================================================== -->
-            <!-- TAB 4: PAYMENT CONFIRMATION (DAILY LEAD LOG RECEIPT STATUS)    -->
-            <!-- =============================================================== -->
+            <!-- TAB 4: PAYMENT CONFIRMATION -->
             <section id="ws-view-payment-confirm" class="hidden animate-fade-in space-y-6">
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
@@ -508,7 +452,6 @@ async function apiAdminSaveDb(db, pin) {
                     </button>
                 </div>
 
-                <!-- Confirmation Summary Cards -->
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div class="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
                         <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Confirmed by Daily Lead Log</span>
@@ -530,7 +473,6 @@ async function apiAdminSaveDb(db, pin) {
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                    <!-- Left: Submit Payment Reference / Notification -->
                     <div class="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-4">
                         <div>
                             <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-600">Notify Billing Desk</span>
@@ -572,10 +514,7 @@ async function apiAdminSaveDb(db, pin) {
                         </form>
                     </div>
 
-                    <!-- Right: Per-Invoice Payment Confirmation Status List -->
-                    <div class="lg:col-span-7 space-y-3.5" id="payment-confirmation-cards">
-                        <!-- Populated via JS -->
-                    </div>
+                    <div class="lg:col-span-7 space-y-3.5" id="payment-confirmation-cards"></div>
                 </div>
             </section>
 
@@ -589,9 +528,7 @@ async function apiAdminSaveDb(db, pin) {
         </footer>
     </div>
 
-    <!-- ===================================================================== -->
-    <!-- MODAL: INVOICE LINE-ITEM BREAKDOWN & COPY                             -->
-    <!-- ===================================================================== -->
+    <!-- MODAL: INVOICE LINE-ITEM BREAKDOWN & COPY -->
     <div id="invoice-breakdown-modal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
         <div class="bg-white rounded-2xl max-w-lg w-full border border-slate-200 shadow-2xl overflow-hidden animate-fade-in">
             <div class="px-5 py-4 bg-navy-900 text-white flex items-center justify-between">
@@ -600,39 +537,132 @@ async function apiAdminSaveDb(db, pin) {
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
-            <div id="inv-modal-body" class="p-5 space-y-4">
-                <!-- Populated via JS -->
-            </div>
+            <div id="inv-modal-body" class="p-5 space-y-4"></div>
         </div>
     </div>
 
-    <!-- Toast Container -->
     <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-    <!-- ===================================================================== -->
-    <!-- SINGLE-CLIENT PORTAL STATE & APPLICATION LOGIC                        -->
-    <!-- ===================================================================== -->
     <script>
         const SINGLE_CLIENT_STORAGE_KEY = 'dailyleadlog_single_client_v2';
+
+        async function apiClientLogin(identifier, password) {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: 'clientLogin', identifier, password })
+            });
+            return res.json();
+        }
+
+        async function apiClientUpdate(payload) {
+            const res = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(Object.assign({ action: 'clientUpdate' }, payload))
+            });
+            return res.json();
+        }
+
+        async function apiFetchClientBundle(clientId) {
+            const url = `${API_URL}?role=client&clientId=${encodeURIComponent(clientId)}&_t=${Date.now()}`;
+            const res = await fetch(url, { method: 'GET' });
+            return res.json();
+        }
+
+        function normalizeClientBundle(rawClient, rawLeads, rawInvoices, existingState) {
+            const prevClient = existingState?.client || {};
+            const states = Array.isArray(rawClient?.states)
+                ? rawClient.states
+                : (rawClient?.states ? String(rawClient.states).split(',').map(s => s.trim()).filter(Boolean) : (prevClient.states || ['Texas']));
+            const zips = Array.isArray(rawClient?.zips) && rawClient.zips.length
+                ? rawClient.zips
+                : (prevClient.zips || ['All Approved TX Zips']);
+
+            const client = {
+                id: rawClient?.id || prevClient.id || '',
+                name: rawClient?.name || prevClient.name || 'Client',
+                agency: rawClient?.agency || prevClient.agency || 'Daily Lead Log Client',
+                states,
+                zips,
+                timings: rawClient?.timings || prevClient.timings || '09:00 AM - 06:00 PM CST',
+                criteriaNotes: rawClient?.notes || rawClient?.criteriaNotes || prevClient.criteriaNotes || '',
+                lineStatus: rawClient?.status || rawClient?.lineStatus || prevClient.lineStatus || 'Active',
+                statusNote: rawClient?.statusNote !== undefined ? rawClient.statusNote : (prevClient.statusNote || ''),
+                dailyCap: Number(rawClient?.dailyCap ?? prevClient.dailyCap ?? 6),
+                leadsSentToday: Number(rawClient?.leadsSentToday ?? prevClient.leadsSentToday ?? 0),
+                oneTimeUnlimitedToday: Boolean(rawClient?.oneTimeUnlimitedToday ?? prevClient.oneTimeUnlimitedToday ?? false),
+                oneTimeUnlimitedActivatedAt: rawClient?.oneTimeUnlimitedActivatedAt || prevClient.oneTimeUnlimitedActivatedAt || null,
+                coolTimeMinutes: Number(rawClient?.coolDownMinutes ?? rawClient?.coolTimeMinutes ?? prevClient.coolTimeMinutes ?? 2),
+                coolDownEndTime: rawClient?.coolDownEndTime ?? prevClient.coolDownEndTime ?? null,
+                ratePerLead: Number(rawClient?.ratePerLead ?? prevClient.ratePerLead ?? 30)
+            };
+
+            const leads = (Array.isArray(rawLeads) ? rawLeads : []).map(l => ({
+                id: l.id,
+                scope: l.scope || 'TODAY',
+                receivedAt: l.receivedAt || l.timestamp || 'Recently',
+                transferType: l.transferType || l.status || 'Live Warm Transfer',
+                name: l.name || 'Prospect',
+                phone: l.phone || '',
+                dob: l.dob || 'N/A',
+                age: l.age ?? 'N/A',
+                spouse: l.spouse || 'No',
+                address: l.address || '',
+                state: l.state || states[0] || '',
+                autoCarrier: l.autoCarrier || 'N/A',
+                lapses: l.lapses || 'No',
+                vehicles: l.vehicles || l.vehicle || 'N/A',
+                accidents: l.accidents || 'No',
+                tickets: l.tickets || 'No',
+                homeOwner: l.homeOwner || 'Yes',
+                homeType: l.homeType || 'Single Family',
+                homeCarrier: l.homeCarrier || 'N/A',
+                claims3Yr: l.claims3Yr || l.claims || 'No',
+                feedbackStatus: l.feedbackStatus || 'Pending Review',
+                comments: Array.isArray(l.comments) ? l.comments : (Array.isArray(l.clientComments) ? l.clientComments : [])
+            }));
+
+            const invoices = (Array.isArray(rawInvoices) ? rawInvoices : []).map(inv => ({
+                id: inv.id,
+                period: inv.period || 'Current Period',
+                leadCount: Number(inv.leadCount ?? 0),
+                rate: Number(inv.rate ?? client.ratePerLead ?? 30),
+                total: Number(inv.total ?? 0),
+                dueDate: inv.dueDate || 'TBD',
+                status: inv.status || 'Pending',
+                confirmationStatus: inv.confirmationStatus || (inv.status === 'Paid' ? 'Awaiting Confirmation' : 'Not Paid Yet'),
+                confirmedAt: inv.confirmedAt || null,
+                confirmationRef: inv.confirmationRef || null,
+                paymentMethod: inv.paymentMethod || null,
+                clientNote: inv.clientNote || null,
+                lineItems: Array.isArray(inv.lineItems) && inv.lineItems.length
+                    ? inv.lineItems
+                    : (Array.isArray(inv.items) && inv.items.length ? inv.items : [`${inv.leadCount || 0} leads @ $${inv.rate || 30} — $${Number(inv.total || 0).toFixed(2)}`])
+            }));
+
+            return { client, leads, invoices };
+        }
 
         function getInitialSingleClientState() {
             return {
                 loggedIn: false,
-                activeTab: 'leads',   // 'leads' | 'controls' | 'invoices' | 'payment-confirm'
-                scopeFilter: 'ALL',   // 'ALL' | 'TODAY' | 'PREVIOUS'
+                activeTab: 'leads',
+                scopeFilter: 'ALL',
                 credentials: {
                     email: 'anthony.aguilar@txinsurance-group.com',
                     username: 'anthony_tx',
-                    password: 'ClientAccess2026!'
+                    password: 'ChangeMeNow2026!'
                 },
                 client: {
+                    id: 'ad581e23-8ffe-4ec9-94fe-a7e1f4b2c24d',
                     name: 'Anthony Aguilar',
                     agency: 'Aguilar Risk & Auto Advisors',
                     states: ['Texas'],
-                    zips: ['78201', '78209', '78701', '75201', 'All Approved TX Zips'],
+                    zips: ['All Approved TX Zips'],
                     timings: '09:00 AM - 06:00 PM CST',
                     criteriaNotes: 'Multi car Must with renter or homeowner / 12 month prior insurance / Age below 75',
-                    lineStatus: 'Active', // 'Active' | 'Paused' | 'Cool Time'
+                    lineStatus: 'Active',
                     statusNote: 'Ready for live transfers',
                     dailyCap: 6,
                     leadsSentToday: 3,
@@ -642,195 +672,13 @@ async function apiAdminSaveDb(db, pin) {
                     coolDownEndTime: null,
                     ratePerLead: 30
                 },
-                leads: [
-                    {
-                        id: 'LD-3091',
-                        scope: 'TODAY',
-                        receivedAt: 'Today, 02:35 PM CST',
-                        transferType: 'Live Warm Transfer',
-                        name: 'Margaret Holloway',
-                        phone: '2105550194',
-                        dob: '04/14/1962',
-                        age: 64,
-                        spouse: 'Yes',
-                        address: '4820 Whispering Oaks Dr, San Antonio, TX 78209',
-                        state: 'TX, Texas',
-                        autoCarrier: 'Allstate - 3 years',
-                        lapses: 'No',
-                        vehicles: '2018 Honda CR-V & 2020 Ford F-150',
-                        accidents: 'No',
-                        tickets: 'No',
-                        homeOwner: 'Yes',
-                        homeType: 'Single Family',
-                        homeCarrier: 'Allstate',
-                        claims3Yr: 'No',
-                        feedbackStatus: 'Pending Review',
-                        comments: [
-                            { author: 'Anthony Aguilar', time: '15 mins ago', text: 'Spoke with Margaret, verifying 2 vehicles and home policy details for quote.' }
-                        ]
-                    },
-                    {
-                        id: 'LD-3088',
-                        scope: 'TODAY',
-                        receivedAt: 'Today, 12:12 PM CST',
-                        transferType: 'Live Warm Transfer',
-                        name: 'Patricia Morales',
-                        phone: '5125550177',
-                        dob: '08/25/1968',
-                        age: 58,
-                        spouse: 'Yes',
-                        address: '310 Congress Ave, Austin, TX 78701',
-                        state: 'TX, Texas',
-                        autoCarrier: 'Farmers - 4 years',
-                        lapses: 'No',
-                        vehicles: '2020 Toyota RAV4 & 2022 Chevy Silverado',
-                        accidents: 'No',
-                        tickets: 'No',
-                        homeOwner: 'Yes',
-                        homeType: 'Single Family',
-                        homeCarrier: 'Farmers',
-                        claims3Yr: 'No',
-                        feedbackStatus: 'Accepted / Bound',
-                        comments: [
-                            { author: 'Anthony Aguilar', time: '1 hr ago', text: 'Bundled auto + homeowners policy bound.' }
-                        ]
-                    },
-                    {
-                        id: 'LD-3084',
-                        scope: 'TODAY',
-                        receivedAt: 'Today, 10:18 AM CST',
-                        transferType: 'Live Warm Transfer',
-                        name: 'Carlos Delgado',
-                        phone: '2145550133',
-                        dob: '11/02/1975',
-                        age: 51,
-                        spouse: 'No',
-                        address: '1904 Elm St, Dallas, TX 75201',
-                        state: 'TX, Texas',
-                        autoCarrier: 'Progressive - 18 months',
-                        lapses: 'No',
-                        vehicles: '2019 Mazda CX-5 & 2017 Hyundai Elantra',
-                        accidents: 'No',
-                        tickets: 'No',
-                        homeOwner: 'No (Renter)',
-                        homeType: 'Renters',
-                        homeCarrier: 'Progressive',
-                        claims3Yr: 'No',
-                        feedbackStatus: 'Disputed / Replacement',
-                        comments: [
-                            { author: 'Anthony Aguilar', time: '2 hrs ago', text: 'Renter policy carrier could not confirm active renters declarations page.' }
-                        ]
-                    },
-                    {
-                        id: 'LD-3064',
-                        scope: 'PREVIOUS',
-                        receivedAt: 'Yesterday, 03:45 PM CST',
-                        transferType: 'Live Warm Transfer',
-                        name: 'Diane Whitaker',
-                        phone: '2105550119',
-                        dob: '03/19/1959',
-                        age: 67,
-                        spouse: 'Yes',
-                        address: '742 Huebner Rd, San Antonio, TX 78201',
-                        state: 'TX, Texas',
-                        autoCarrier: 'State Farm - 5 years',
-                        lapses: 'No',
-                        vehicles: '2021 Subaru Outback & 2018 Nissan Rogue',
-                        accidents: 'No',
-                        tickets: 'No',
-                        homeOwner: 'Yes',
-                        homeType: 'Single Family',
-                        homeCarrier: 'State Farm',
-                        claims3Yr: 'No',
-                        feedbackStatus: 'Accepted / Bound',
-                        comments: [
-                            { author: 'Anthony Aguilar', time: 'Yesterday', text: 'Bound full bundle yesterday afternoon.' }
-                        ]
-                    },
-                    {
-                        id: 'LD-3052',
-                        scope: 'PREVIOUS',
-                        receivedAt: 'Nov 24, 01:20 PM CST',
-                        transferType: 'Live Warm Transfer',
-                        name: 'Howard Jenkins',
-                        phone: '7135550144',
-                        dob: '07/04/1965',
-                        age: 61,
-                        spouse: 'Yes',
-                        address: '1050 Kirby Dr, Houston, TX 77019',
-                        state: 'TX, Texas',
-                        autoCarrier: 'USAA - 7 years',
-                        lapses: 'No',
-                        vehicles: '2020 Lexus RX & 2018 Toyota Tundra',
-                        accidents: 'No',
-                        tickets: 'No',
-                        homeOwner: 'Yes',
-                        homeType: 'Single Family',
-                        homeCarrier: 'USAA',
-                        claims3Yr: 'No',
-                        feedbackStatus: 'Accepted / Bound',
-                        comments: []
-                    }
-                ],
-                invoices: [
-                    {
-                        id: 'INV-2026-084',
-                        period: 'Nov 18 – Nov 25, 2026',
-                        leadCount: 5,
-                        rate: 30,
-                        total: 150,
-                        dueDate: 'Nov 28, 2026',
-                        status: 'Pending',
-                        confirmationStatus: 'Not Paid Yet', // 'Confirmed by Daily Lead Log' | 'Awaiting Confirmation' | 'Not Paid Yet'
-                        confirmedAt: null,
-                        confirmationRef: null,
-                        paymentMethod: null,
-                        clientNote: null,
-                        lineItems: [
-                            'LD-3064 (Diane Whitaker — TX) — $30.00',
-                            'LD-3052 (Howard Jenkins — TX) — $30.00',
-                            '3 prior verified TX multi-car/home leads — $90.00'
-                        ]
-                    },
-                    {
-                        id: 'INV-2026-076',
-                        period: 'Nov 02 – Nov 09, 2026',
-                        leadCount: 4,
-                        rate: 30,
-                        total: 120,
-                        dueDate: 'Nov 12, 2026',
-                        status: 'Overdue',
-                        confirmationStatus: 'Awaiting Confirmation',
-                        confirmedAt: null,
-                        confirmationRef: 'ACH-773190 (Submitted Nov 25)',
-                        paymentMethod: 'ACH Bank Transfer',
-                        clientNote: 'Initiated ACH transfer for overdue balance.',
-                        lineItems: [
-                            '4 verified TX bundle transfers — $120.00'
-                        ]
-                    },
-                    {
-                        id: 'INV-2026-071',
-                        period: 'Oct 25 – Nov 01, 2026',
-                        leadCount: 6,
-                        rate: 30,
-                        total: 180,
-                        dueDate: 'Nov 04, 2026',
-                        status: 'Paid',
-                        confirmationStatus: 'Confirmed by Daily Lead Log',
-                        confirmedAt: 'Nov 03, 2026 • 01:42 PM CST',
-                        confirmationRef: 'DLL-CONF-50921',
-                        paymentMethod: 'ACH Bank Transfer',
-                        clientNote: 'Paid in full ahead of due date.',
-                        lineItems: [
-                            '6 verified TX bundle transfers — $180.00 (Confirmed Received)'
-                        ]
-                    }
-                ]
+                leads: [],
+                invoices: []
             };
         }
 
         let appState = loadSingleClientState();
+        let isSyncing = false;
 
         function loadSingleClientState() {
             try {
@@ -838,7 +686,7 @@ async function apiAdminSaveDb(db, pin) {
                 if (raw) {
                     const parsed = JSON.parse(raw);
                     if (parsed && parsed.client && Array.isArray(parsed.leads) && Array.isArray(parsed.invoices)) {
-                        return parsed;
+                        return Object.assign(getInitialSingleClientState(), parsed);
                     }
                 }
             } catch (e) {
@@ -855,9 +703,49 @@ async function apiAdminSaveDb(db, pin) {
             }
         }
 
-        // =====================================================================
-        // LIVE 1-SECOND COOL-TIME COUNTDOWN LOOP
-        // =====================================================================
+        async function syncClientFromDrive(silent = true) {
+            if (!appState.loggedIn || !appState.client?.id || isSyncing) return;
+            isSyncing = true;
+            try {
+                const data = await apiFetchClientBundle(appState.client.id);
+                if (data && data.ok && data.client) {
+                    const normalized = normalizeClientBundle(data.client, data.leads, data.invoices, appState);
+                    appState.client = normalized.client;
+                    appState.leads = normalized.leads;
+                    appState.invoices = normalized.invoices;
+                    saveSingleClientState();
+                    renderWorkspace();
+                    if (!silent) showToast('Synced latest updates from Google Drive.', 'success');
+                }
+            } catch (err) {
+                if (!silent) showToast('Could not reach Google Drive sync endpoint.', 'warning');
+            } finally {
+                isSyncing = false;
+            }
+        }
+
+        function manualSyncNow() {
+            syncClientFromDrive(false);
+        }
+
+        async function pushClientUpdate(payload, successToast = null) {
+            saveSingleClientState();
+            renderWorkspace();
+            if (!appState.client?.id) return;
+            try {
+                const res = await apiClientUpdate(Object.assign({ clientId: appState.client.id }, payload));
+                if (res && res.ok) {
+                    await syncClientFromDrive(true);
+                    if (successToast) showToast(successToast, 'success');
+                } else {
+                    showToast(res?.error || 'Saved locally; Drive sync returned a message.', 'warning');
+                }
+            } catch (err) {
+                showToast('Saved locally; could not reach Google Drive API.', 'warning');
+            }
+        }
+
+        // Live 1-second cool-time countdown & 6-second Google Drive polling loop
         setInterval(() => {
             const c = appState.client;
             if (c.lineStatus === 'Cool Time' && c.coolDownEndTime) {
@@ -866,16 +754,26 @@ async function apiAdminSaveDb(db, pin) {
                     c.coolDownEndTime = null;
                     c.lineStatus = 'Active';
                     c.statusNote = 'Ready for live transfers';
-                    saveSingleClientState();
                     if (appState.loggedIn) {
-                        renderWorkspace();
-                        showToast('Cool-time finished! Your receiving line is Active.', 'success');
+                        pushClientUpdate({
+                            clientPatch: {
+                                coolDownEndTime: null,
+                                status: 'Active',
+                                statusNote: 'Ready for live transfers'
+                            }
+                        }, 'Cool-time finished! Your receiving line is Active.');
                     }
                 } else if (appState.loggedIn) {
                     updateCountdownReadouts();
                 }
             }
         }, 1000);
+
+        setInterval(() => {
+            if (appState.loggedIn && document.visibilityState === 'visible') {
+                syncClientFromDrive(true);
+            }
+        }, 6000);
 
         function getRemainingSeconds() {
             if (!appState.client.coolDownEndTime) return 0;
@@ -915,12 +813,12 @@ async function apiAdminSaveDb(db, pin) {
             }
         }
 
-        // =====================================================================
-        // LOGIN & LOGOUT (NO OTHER CLIENTS EXPOSED)
-        // =====================================================================
         window.addEventListener('DOMContentLoaded', () => {
             syncLoginVsWorkspace();
             renderWorkspace();
+            if (appState.loggedIn && appState.client?.id) {
+                syncClientFromDrive(true);
+            }
         });
 
         function syncLoginVsWorkspace() {
@@ -942,11 +840,12 @@ async function apiAdminSaveDb(db, pin) {
             showToast('Sample client credentials filled.', 'info');
         }
 
-        function handleClientLogin(e) {
+        async function handleClientLogin(e) {
             e.preventDefault();
-            const identifier = document.getElementById('client-login-email').value.trim().toLowerCase();
+            const identifier = document.getElementById('client-login-email').value.trim();
             const password = document.getElementById('client-login-password').value;
             const errBanner = document.getElementById('login-error-banner');
+            const submitBtn = document.getElementById('client-login-submit-btn');
 
             if (!identifier || !password) {
                 errBanner.textContent = 'Please enter both your email/username and password.';
@@ -955,11 +854,31 @@ async function apiAdminSaveDb(db, pin) {
             }
 
             errBanner.classList.add('hidden');
-            appState.loggedIn = true;
-            saveSingleClientState();
-            syncLoginVsWorkspace();
-            renderWorkspace();
-            showToast(`Signed in to Daily Lead Log.`, 'success');
+            submitBtn.disabled = true;
+
+            try {
+                const res = await apiClientLogin(identifier, password);
+                if (!res || !res.ok || !res.client) {
+                    errBanner.textContent = res?.error || 'Invalid client credentials.';
+                    errBanner.classList.remove('hidden');
+                    return;
+                }
+
+                const normalized = normalizeClientBundle(res.client, res.leads, res.invoices, appState);
+                appState.client = normalized.client;
+                appState.leads = normalized.leads;
+                appState.invoices = normalized.invoices;
+                appState.loggedIn = true;
+                saveSingleClientState();
+                syncLoginVsWorkspace();
+                renderWorkspace();
+                showToast(`Signed in as ${appState.client.name}.`, 'success');
+            } catch (err) {
+                errBanner.textContent = 'Unable to connect to Google Drive authentication service.';
+                errBanner.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+            }
         }
 
         function logoutToBlankLogin() {
@@ -972,9 +891,6 @@ async function apiAdminSaveDb(db, pin) {
             showToast('Logged out.', 'info');
         }
 
-        // =====================================================================
-        // WORKSPACE NAVIGATION & RENDERING
-        // =====================================================================
         function switchWorkspaceTab(tabName) {
             appState.activeTab = tabName;
             saveSingleClientState();
@@ -1021,7 +937,6 @@ async function apiAdminSaveDb(db, pin) {
                 statusBadge.textContent = 'Paused';
             }
 
-            // Tab badges
             document.getElementById('badge-leads-count').textContent = appState.leads.length;
             document.getElementById('badge-cap-status').textContent = c.oneTimeUnlimitedToday
                 ? `${c.leadsSentToday}/∞`
@@ -1034,7 +949,6 @@ async function apiAdminSaveDb(db, pin) {
             const confirmedInvoices = appState.invoices.filter(i => i.confirmationStatus === 'Confirmed by Daily Lead Log');
             document.getElementById('badge-payment-confirm-status').textContent = `${confirmedInvoices.length}/${appState.invoices.length} Conf`;
 
-            // KPI 1: Today's Leads
             document.getElementById('kpi-todays-leads').textContent = c.oneTimeUnlimitedToday
                 ? `${c.leadsSentToday} / Unlimited`
                 : `${c.leadsSentToday} / ${c.dailyCap}`;
@@ -1042,16 +956,13 @@ async function apiAdminSaveDb(db, pin) {
                 ? 'One-Time Unlimited Boost active today'
                 : `Daily cap active • $${c.ratePerLead}/lead`;
 
-            // KPI 2: Cool-Time Status
             document.getElementById('kpi-cool-sub').textContent = `${c.coolTimeMinutes}-minute post-lead buffer`;
 
-            // KPI 3: Pending Balance
             document.getElementById('kpi-pending-balance').textContent = `$${pendingSum.toFixed(2)}`;
             document.getElementById('kpi-pending-sub').textContent = openInvoices.length === 1
                 ? '1 unpaid invoice'
                 : `${openInvoices.length} unpaid invoices`;
 
-            // KPI 4: Open Feedback / Disputes
             const openFeedbackCount = appState.leads.filter(l =>
                 l.feedbackStatus === 'Pending Review' || l.feedbackStatus === 'Disputed / Replacement'
             ).length;
@@ -1060,9 +971,6 @@ async function apiAdminSaveDb(db, pin) {
             document.getElementById('kpi-open-feedback-sub').textContent = `${disputeOnlyCount} disputed / replacement`;
         }
 
-        // =====================================================================
-        // TAB 1: LIVE & PREVIOUS LEADS
-        // =====================================================================
         function setScopeFilter(scope) {
             appState.scopeFilter = scope;
             saveSingleClientState();
@@ -1166,7 +1074,6 @@ async function apiAdminSaveDb(db, pin) {
                             </div>
                         </div>
 
-                        <!-- Auto & Home Details -->
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                             <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
                                 <p class="font-bold uppercase tracking-wider text-[10px] text-indigo-700">Auto Policy Details</p>
@@ -1183,7 +1090,6 @@ async function apiAdminSaveDb(db, pin) {
                             </div>
                         </div>
 
-                        <!-- Client Comments Thread -->
                         <div class="pt-1 space-y-2">
                             <div class="space-y-1.5">
                                 ${commentsHtml}
@@ -1204,9 +1110,9 @@ async function apiAdminSaveDb(db, pin) {
             const lead = appState.leads.find(l => l.id === leadId);
             if (!lead) return;
             lead.feedbackStatus = newStatus;
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Feedback status updated: ${newStatus}`, 'success');
+            pushClientUpdate({
+                leadFeedback: { leadId, feedbackStatus: newStatus }
+            }, `Feedback status updated: ${newStatus}`);
         }
 
         function addCommentToLead(leadId) {
@@ -1217,17 +1123,18 @@ async function apiAdminSaveDb(db, pin) {
             const lead = appState.leads.find(l => l.id === leadId);
             if (!lead) return;
 
-            if (!lead.comments) lead.comments = [];
-            lead.comments.push({
+            const commentObj = {
                 author: appState.client.name,
                 time: 'Just now',
                 text
-            });
-
+            };
+            if (!lead.comments) lead.comments = [];
+            lead.comments.push(commentObj);
             input.value = '';
-            saveSingleClientState();
-            renderClientLeadsList();
-            showToast('Comment posted.', 'success');
+
+            pushClientUpdate({
+                leadFeedback: { leadId, newComment: commentObj }
+            }, 'Comment posted.');
         }
 
         function simulateNewClientLead() {
@@ -1262,15 +1169,18 @@ async function apiAdminSaveDb(db, pin) {
 
             appState.leads.unshift(lead);
             c.leadsSentToday += 1;
-
             if (c.coolTimeMinutes > 0) {
                 c.lineStatus = 'Cool Time';
                 c.coolDownEndTime = Date.now() + c.coolTimeMinutes * 60 * 1000;
             }
 
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`New lead ${lead.name} received!`, 'success');
+            pushClientUpdate({
+                clientPatch: {
+                    leadsSentToday: c.leadsSentToday,
+                    status: c.lineStatus,
+                    coolDownEndTime: c.coolDownEndTime
+                }
+            }, `New lead ${lead.name} received!`);
         }
 
         function copyLeadSummary(leadId) {
@@ -1296,9 +1206,6 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
             copyToClipboard(summary, `Copied summary for ${lead.name}!`);
         }
 
-        // =====================================================================
-        // TAB 2: LINE & CAP CONTROLS
-        // =====================================================================
         function renderLineAndCapControls() {
             const c = appState.client;
 
@@ -1324,7 +1231,6 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
                 coolPill.className = 'px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200';
             }
 
-            // Cap & One-Time Unlimited
             document.getElementById('ctrl-cap-pill').textContent = c.oneTimeUnlimitedToday ? 'Unlimited (Today)' : `Cap: ${c.dailyCap}`;
             document.getElementById('ctrl-cap-number').textContent = c.dailyCap;
             document.getElementById('ctrl-cap-progress').textContent = c.oneTimeUnlimitedToday
@@ -1375,23 +1281,25 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
             } else if (stateName === 'Paused' && c.statusNote === 'Ready for live transfers') {
                 c.statusNote = 'Paused by client';
             }
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Line set to ${stateName}.`, stateName === 'Active' ? 'success' : 'warning');
+            pushClientUpdate({
+                clientPatch: {
+                    status: c.lineStatus,
+                    coolDownEndTime: c.coolDownEndTime,
+                    statusNote: c.statusNote
+                }
+            }, `Line set to ${stateName}.`);
         }
 
         function updateLineStatusNote(val) {
-            appState.client.statusNote = val.trim();
-            saveSingleClientState();
-            showToast('Line status note saved.', 'info');
+            const note = val.trim();
+            appState.client.statusNote = note;
+            pushClientUpdate({ clientPatch: { statusNote: note } }, 'Line status note saved.');
         }
 
         function updateCoolTimeMinutes(val) {
             const mins = Math.max(0, Math.min(30, parseInt(val, 10) || 0));
             appState.client.coolTimeMinutes = mins;
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Cool-time duration set to ${mins} minute(s).`, 'success');
+            pushClientUpdate({ clientPatch: { coolDownMinutes: mins } }, `Cool-time duration set to ${mins} minute(s).`);
         }
 
         function startCoolDownNow() {
@@ -1399,9 +1307,12 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
             const mins = c.coolTimeMinutes > 0 ? c.coolTimeMinutes : 2;
             c.lineStatus = 'Cool Time';
             c.coolDownEndTime = Date.now() + mins * 60 * 1000;
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Started ${mins}-minute cool-time timer.`, 'warning');
+            pushClientUpdate({
+                clientPatch: {
+                    status: 'Cool Time',
+                    coolDownEndTime: c.coolDownEndTime
+                }
+            }, `Started ${mins}-minute cool-time timer.`);
         }
 
         function resetCoolDownTimer() {
@@ -1410,16 +1321,18 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
             if (c.lineStatus === 'Cool Time') {
                 c.lineStatus = 'Active';
             }
-            saveSingleClientState();
-            renderWorkspace();
-            showToast('Cool-time timer reset.', 'info');
+            pushClientUpdate({
+                clientPatch: {
+                    coolDownEndTime: null,
+                    status: c.lineStatus
+                }
+            }, 'Cool-time timer reset.');
         }
 
         function adjustDailyCap(delta) {
             const c = appState.client;
             c.dailyCap = Math.max(1, c.dailyCap + delta);
-            saveSingleClientState();
-            renderWorkspace();
+            pushClientUpdate({ clientPatch: { dailyCap: c.dailyCap } });
         }
 
         function toggleOneTimeUnlimitedBoost() {
@@ -1429,18 +1342,18 @@ Home Carrier: ${lead.homeCarrier} | 3-Yr Claims: ${lead.claims3Yr}
                 c.oneTimeUnlimitedActivatedAt = 'Today (Single-Day Boost)';
                 c.coolDownEndTime = null;
                 c.lineStatus = 'Active';
-                showToast('One-Time Unlimited Leads Boost activated for today!', 'success');
             } else {
                 c.oneTimeUnlimitedActivatedAt = null;
-                showToast('One-Time Unlimited Leads Boost turned off.', 'info');
             }
-            saveSingleClientState();
-            renderWorkspace();
+            pushClientUpdate({
+                clientPatch: {
+                    oneTimeUnlimitedToday: c.oneTimeUnlimitedToday,
+                    coolDownEndTime: c.coolDownEndTime,
+                    status: c.lineStatus
+                }
+            }, c.oneTimeUnlimitedToday ? 'One-Time Unlimited Leads Boost activated for today!' : 'One-Time Unlimited Leads Boost turned off.');
         }
 
-        // =====================================================================
-        // TAB 3: INVOICES
-        // =====================================================================
         function getConfirmationBadgeHtml(inv) {
             if (inv.confirmationStatus === 'Confirmed by Daily Lead Log') {
                 return `
@@ -1551,17 +1464,22 @@ Total Amount: $${inv.total.toFixed(2)}`;
             const inv = appState.invoices.find(i => i.id === invId);
             if (!inv) return;
             inv.status = 'Paid';
-            inv.confirmationStatus = 'Awaiting Confirmation';
+            if (inv.confirmationStatus !== 'Confirmed by Daily Lead Log') {
+                inv.confirmationStatus = 'Awaiting Confirmation';
+            }
             inv.confirmationRef = inv.confirmationRef || `PAID-PORTAL-${inv.id.slice(-3)}`;
             inv.paymentMethod = inv.paymentMethod || 'Client Portal Payment';
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Payment submitted for ${inv.id}. Awaiting Daily Lead Log confirmation.`, 'success');
+
+            pushClientUpdate({
+                paymentNotice: {
+                    invoiceId: inv.id,
+                    markPaid: true,
+                    paymentMethod: inv.paymentMethod,
+                    confirmationRef: inv.confirmationRef
+                }
+            }, `Payment submitted for ${inv.id}. Awaiting Daily Lead Log confirmation.`);
         }
 
-        // =====================================================================
-        // TAB 4: PAYMENT CONFIRMATION (DAILY LEAD LOG RECEIPT STATUS)
-        // =====================================================================
         function renderPaymentConfirmationView() {
             const confirmedList = appState.invoices.filter(i => i.confirmationStatus === 'Confirmed by Daily Lead Log');
             const awaitingList = appState.invoices.filter(i => i.confirmationStatus === 'Awaiting Confirmation');
@@ -1576,7 +1494,6 @@ Total Amount: $${inv.total.toFixed(2)}`;
             document.getElementById('pc-kpi-unpaid').textContent = `${unpaidList.length} ${unpaidList.length === 1 ? 'Invoice' : 'Invoices'}`;
             document.getElementById('pc-kpi-unpaid-amt').textContent = `$${unpaidList.reduce((s, i) => s + i.total, 0).toFixed(2)} not yet paid`;
 
-            // Populate invoice selector in payment notice form
             const selectEl = document.getElementById('pc-invoice-select');
             if (selectEl) {
                 const currentVal = selectEl.value;
@@ -1589,7 +1506,6 @@ Total Amount: $${inv.total.toFixed(2)}`;
                 }
             }
 
-            // Render per-invoice confirmation cards
             const cardsContainer = document.getElementById('payment-confirmation-cards');
             if (!cardsContainer) return;
 
@@ -1655,9 +1571,14 @@ Total Amount: $${inv.total.toFixed(2)}`;
             document.getElementById('pc-reference').value = '';
             document.getElementById('pc-note').value = '';
 
-            saveSingleClientState();
-            renderWorkspace();
-            showToast(`Payment notice logged for ${inv.id} (${ref}).`, 'success');
+            pushClientUpdate({
+                paymentNotice: {
+                    invoiceId: inv.id,
+                    paymentMethod: method,
+                    confirmationRef: ref,
+                    clientNote: note || undefined
+                }
+            }, `Payment notice logged for ${inv.id} (${ref}).`);
         }
 
         function copyInvoicesOverview() {
@@ -1670,9 +1591,6 @@ Total Amount: $${inv.total.toFixed(2)}`;
             copyToClipboard(text, 'Copied invoice balance summary!');
         }
 
-        // =====================================================================
-        // CLIPBOARD & TOAST UTILITIES
-        // =====================================================================
         function copyToClipboard(text, toastMsg = 'Copied to clipboard!') {
             const ta = document.createElement('textarea');
             ta.value = text;
