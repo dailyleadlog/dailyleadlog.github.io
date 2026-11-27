@@ -1842,32 +1842,6 @@ async function handleAdminLogin(e) {
                 : `<span class="text-xs text-slate-500">No restricted persons listed.</span>`;
         }
 
-function formatSentWhen(rawDate) {
-    if (!rawDate || rawDate === 'Just now') return 'Just now';
-    const d = new Date(rawDate);
-    if (Number.isNaN(d.getTime())) return String(rawDate);
-
-    const exact = d.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-    });
-
-    const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
-    if (diffSec < 60) return `Just now • ${exact}`;
-
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago • ${exact}`;
-
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago • ${exact}`;
-
-    const diffDay = Math.floor(diffHr / 24);
-    return `${diffDay}d ago • ${exact}`;
-}
-
 function checkPhoneStatus(manualClick = false) {
     const phoneInput = document.getElementById('lead-phone');
     const raw = phoneInput.value.replace(/\D/g, '');
@@ -1888,61 +1862,49 @@ function checkPhoneStatus(manualClick = false) {
 
     if (matches.length > 0) {
         const latest = matches[0];
-        const latestWhen = formatSentWhen(latest.sentAt || latest.timestamp);
         const sameClientMatch = selectedAgent
             ? matches.find(m => m.agentId === selectedAgent.id || m.agentName === selectedAgent.name)
             : null;
 
-        historyBadge.title = `Last sent: ${latestWhen} (${latest.id})`;
-        if (sameClientMatch) {
-            historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
-            historyBadge.textContent = `Already sent to ${sameClientMatch.agentName}! (${formatSentWhen(sameClientMatch.sentAt || sameClientMatch.timestamp)})`;
-        } else {
-            historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200';
-            historyBadge.textContent = `Sent to ${latest.agentName} (${latestWhen}) • Open for other clients`;
-        }
+        // Update small pill badge
+        historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
+        historyBadge.textContent = sameClientMatch
+            ? `Already sent to ${sameClientMatch.agentName}!`
+            : `Submitted (${matches.length}x) → ${latest.agentName}`;
 
+        // Highlight phone input border
         phoneInput.classList.remove('border-slate-300');
         phoneInput.classList.add('border-amber-400', 'bg-amber-50/30');
 
-        const historyLines = matches.map(m => {
-            const whenText = formatSentWhen(m.sentAt || m.timestamp);
-            return `<li class="flex flex-wrap items-center justify-between gap-2 py-1 border-b last:border-b-0 border-current/10" title="${escapeHtml(whenText)}">
+        // Build detailed alert banner
+        const historyLines = matches.map(m =>
+            `<li class="flex flex-wrap items-center justify-between gap-2 py-1 border-b last:border-b-0 border-current/10">
                 <span><strong>${escapeHtml(m.agentName)}</strong> — Lead: <em>${escapeHtml(m.name)}</em> (${escapeHtml(m.status)})</span>
-                <span class="font-mono text-[11px] opacity-80">${escapeHtml(whenText)} • ${escapeHtml(m.id)}</span>
-            </li>`;
-        }).join('');
+                <span class="font-mono text-[11px] opacity-80">${escapeHtml(m.timestamp || 'Logged')} • ${escapeHtml(m.id)}</span>
+            </li>`
+        ).join('');
 
         if (sameClientMatch) {
             dupAlert.className = 'mt-2.5 rounded-xl border border-rose-300 bg-rose-50 text-rose-900 p-3 text-xs space-y-1.5 animate-fade-in';
             dupAlert.innerHTML = `
-                <div class="flex items-center justify-between gap-2 font-bold text-rose-700">
-                    <span class="flex items-center gap-1.5">
-                        <span class="material-symbols-outlined text-[18px]">warning</span>
-                        <span>DUPLICATE FOR THIS CLIENT: Already submitted to ${escapeHtml(sameClientMatch.agentName)}!</span>
-                    </span>
-                    <span class="text-[11px] font-semibold text-rose-800">${escapeHtml(formatSentWhen(sameClientMatch.sentAt || sameClientMatch.timestamp))}</span>
+                <div class="flex items-center gap-1.5 font-bold text-rose-700">
+                    <span class="material-symbols-outlined text-[18px]">warning</span>
+                    <span>DUPLICATE FOR THIS CLIENT: Already submitted to ${escapeHtml(sameClientMatch.agentName)}!</span>
                 </div>
                 <ul class="pl-1">${historyLines}</ul>
             `;
         } else {
             dupAlert.className = 'mt-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 p-3 text-xs space-y-1.5 animate-fade-in';
             dupAlert.innerHTML = `
-                <div class="flex flex-wrap items-center justify-between gap-2 font-bold text-amber-800">
-                    <span class="flex items-center gap-1.5">
-                        <span class="material-symbols-outlined text-[18px] text-amber-600">history</span>
-                        <span>Previously sent to ${escapeHtml(latest.agentName)} (${escapeHtml(latestWhen)})</span>
-                    </span>
-                    <span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        Eligible for ${escapeHtml(selectedAgent ? selectedAgent.name : 'another client')}
-                    </span>
+                <div class="flex items-center gap-1.5 font-bold text-amber-800">
+                    <span class="material-symbols-outlined text-[18px] text-amber-600">history</span>
+                    <span>Previous Submission Found — Already submitted to ${escapeHtml(latest.agentName)}:</span>
                 </div>
                 <ul class="pl-1">${historyLines}</ul>
             `;
         }
         dupAlert.classList.remove('hidden');
     } else {
-        historyBadge.removeAttribute('title');
         historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200';
         historyBadge.textContent = 'No transfer found.';
         phoneInput.classList.remove('border-amber-400', 'bg-amber-50/30');
@@ -1963,14 +1925,12 @@ function checkPhoneStatus(manualClick = false) {
 
     if (manualClick) {
         if (matches.length > 0) {
-            const latestWhen = formatSentWhen(matches[0].sentAt || matches[0].timestamp);
-            showToast(`Alert: Already sent to ${matches[0].agentName} (${latestWhen})!`, 'warning');
+            showToast(`Alert: Number already submitted to ${matches[0].agentName}!`, 'warning');
         } else {
             showToast(raw.length >= 10 ? 'No previous submissions found. TCPA Clean.' : 'Enter a valid 10-digit phone number.', raw.length >= 10 ? 'success' : 'warning');
         }
     }
 }
-```[cite: 2, 4]
 
         function checkDncName() {
             const nameVal = document.getElementById('lead-name').value.trim().toLowerCase();
