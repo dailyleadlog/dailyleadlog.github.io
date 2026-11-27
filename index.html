@@ -31,24 +31,27 @@
             }
         }
 
-        const ADMIN_LOGIN_ID = 'admin'; // Change to whatever Login ID you prefer (e.g. 'zaeem' or 'hzarts')
-const ADMIN_PASS_DEFAULT = 'hzarts98765';
-const ADMIN_SESSION_KEY = 'daily_lead_log_admin_logged_in_v1';
-const ADMIN_ID_STORAGE_KEY = 'daily_lead_log_admin_id_v1';
+        let ADMIN_LOGIN_ID = 'admin';
+  let ADMIN_PASS_DEFAULT = '';
+  let ADMIN_SESSION_KEY = 'daily_lead_log_admin_logged_in_v1';
+  let ADMIN_ID_STORAGE_KEY = 'daily_lead_log_admin_id_v1';
 
-function isAdminAuthenticated() {
-    return sessionStorage.getItem(ADMIN_SESSION_KEY) === '1' && Boolean(getAdminPin());
-}
+  function applyAdminConfig(db) {
+    if (!db?.admin) return;
+    ADMIN_LOGIN_ID = db.admin.loginId ?? ADMIN_LOGIN_ID;
+    ADMIN_PASS_DEFAULT = db.admin.passwordDefault ?? ADMIN_PASS_DEFAULT;
+    ADMIN_SESSION_KEY = db.admin.sessionKey ?? ADMIN_SESSION_KEY;
+    ADMIN_ID_STORAGE_KEY = db.admin.idStorageKey ?? ADMIN_ID_STORAGE_KEY;
+  }
 
-function updateAdminGateUI() {
-    const gate = document.getElementById('admin-login-gate');
-    if (!gate) return;
-    if (isAdminAuthenticated()) {
-        gate.classList.add('hidden');
-    } else {
-        gate.classList.remove('hidden');
-    }
-}
+  // Example: call applyAdminConfig(dbData) inside whatever function loads dailyleadlog_db.json
+  async function loadDatabase() {
+    const res = await fetch('./dailyleadlog_db.json');
+    if (!res.ok) throw new Error('Failed to load dailyleadlog_db.json');
+    const db = await res.json();
+    applyAdminConfig(db);
+    return db;
+  }
 
 async function handleAdminLogin(e) {
     e.preventDefault();
