@@ -9,29 +9,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0" />
-    <script>
-        const API_URL = 'https://script.google.com/macros/s/AKfycbwv0Mvho1IegdbFAmEZcYwwrRVuJzdpelAJjnQrc7QiQjfLgF9n3PaiW3DrbldUGOh74w/exec';
-        const ADMIN_PIN_STORAGE_KEY = 'daily_lead_log_admin_pin_v1';
-        const STORAGE_KEY = 'daily_lead_log_portal_v2_empty_clients';
+<script>
+  const API_URL = 'https://script.google.com/macros/s/AKfycbwv0Mvho1IegdbFAmEZcYwwrRVuJzdpelAJjnQrc7QiQjfLgF9n3PaiW3DrbldUGOh74w/exec';
+  const ADMIN_PIN_STORAGE_KEY = 'daily_lead_log_admin_pin_v1';
+  const STORAGE_KEY = 'daily_lead_log_portal_v2_empty_clients';
 
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-                    },
-                    colors: {
-                        navy: {
-                            850: '#131c31',
-                            900: '#0f172a',
-                            950: '#090e1a',
-                        }
-                    }
-                }
-            }
-        }
-
-        let ADMIN_LOGIN_ID = 'admin';
+  let ADMIN_LOGIN_ID = 'admin';
   let ADMIN_PASS_DEFAULT = '';
   let ADMIN_SESSION_KEY = 'daily_lead_log_admin_logged_in_v1';
   let ADMIN_ID_STORAGE_KEY = 'daily_lead_log_admin_id_v1';
@@ -44,7 +27,13 @@
     ADMIN_ID_STORAGE_KEY = db.admin.idStorageKey ?? ADMIN_ID_STORAGE_KEY;
   }
 
-  // Example: call applyAdminConfig(dbData) inside whatever function loads dailyleadlog_db.json
+  function updateAdminGateUI() {
+    const gate = document.getElementById('admin-login-gate');
+    if (!gate) return;
+    const isLoggedIn = sessionStorage.getItem(ADMIN_SESSION_KEY) === '1';
+    gate.classList.toggle('hidden', isLoggedIn);
+  }
+
   async function loadDatabase() {
     const res = await fetch('./dailyleadlog_db.json');
     if (!res.ok) throw new Error('Failed to load dailyleadlog_db.json');
@@ -53,16 +42,16 @@
     return db;
   }
 
-async function handleAdminLogin(e) {
+  async function handleAdminLogin(e) {
     e.preventDefault();
     const enteredId = document.getElementById('admin-login-id').value.trim().toLowerCase();
     const enteredPass = document.getElementById('admin-login-password').value;
     const errorBox = document.getElementById('admin-login-error');
 
-    const validIds = [ADMIN_LOGIN_ID.toLowerCase(), 'admin@dailyleadlog.com', 'hzarts9876'];
-    if (!validIds.includes(enteredId) || enteredPass !== ADMIN_PASS_DEFAULT) {
-        errorBox.classList.remove('hidden');
-        return;
+    const validIds = [ADMIN_LOGIN_ID.toLowerCase(), 'admin@dailyleadlog.com'];
+    if (!validIds.includes(enteredId) || (ADMIN_PASS_DEFAULT && enteredPass !== ADMIN_PASS_DEFAULT)) {
+      errorBox.classList.remove('hidden');
+      return;
     }
 
     errorBox.classList.add('hidden');
@@ -72,8 +61,1667 @@ async function handleAdminLogin(e) {
 
     updateAdminGateUI();
     await pullFromDrive(true);
-}
-    </script>
+  }
+
+  function getEmptyState() {
+    return {
+      selectedAgentId: '',
+      agents: [],
+      leads: [],
+      invoices: []
+    };
+  }
+
+  let state = loadLocalState();
+  let currentFeedbackFilter = 'ALL';
+  let isSyncingDrive = false;
+
+  function getAdminPin() {
+    return localStorage.getItem(ADMIN_PIN_STORAGE_KEY) || '';
+  }
+
+  function setSyncIndicator(status, text) {
+    const dot = document.getElementById('sync-status-dot');
+    const label = document.getElementById('sync-status-text');
+    const menuLabel = document.getElementById('menu-sync-label');
+
+    if (dot && label) {
+      dot.className = 'w-2 h-2 rounded-full';
+      label.className = 'font-bold';
+      if (status === 'live') {
+        dot.classList.add('bg-emerald-400', 'animate-pulse');
+        label.classList.add('text-emerald-400');
+      } else if (status === 'syncing') {
+        dot.classList.add('bg-sky-400', 'animate-ping');
+        label.classList.add('text-sky-300');
+      } else if (status === 'pin') {
+        dot.classList.add('bg-amber-400');
+        label.classList.add('text-amber-300');
+      } else {
+        dot.classList.add('bg-rose-400');
+        label.classList.add('text-rose-300');
+      }
+      label.textContent = text;
+    }
+    if (menuLabel) {
+      menuLabel.textContent = `Drive: ${text}`;
+    }
+  }
+
+  function loadLocalState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.agents) && Array.isArray(parsed.leads) && Array.isArray(parsed.invoices)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load local state.');
+    }
+    return getEmptyState();
+  }
+
+  function saveLocalStateOnly() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('Could not persist local state.');
+    }
+  }
+
+  function normalizeDbPayload(rawDb) {
+    const src = rawDb || {};
+    const clients = Array.isArray(src.clients) ? src.clients : (Array.isArray(src.agents) ? src.agents : []);
+    const leads = Array.isArray(src.leads) ? src.leads : [];
+    const invoices = Array.isArray(src.invoices) ? src.invoices : [];
+
+    const normalizedAgents = clients.map(c => ({
+      id: c.id || ('ag-' + Math.random().toString(36).slice(2, 9)),
+      username: c.username || '',
+      email: c.email || '',
+      password: c.password || '',
+      agency: c.agency || '',
+      name: c.name || 'Unnamed Client',
+      states: Array.isArray(c.states) ? c.states : (typeof c.states === 'string' && c.states.trim() ? c.states.split(',').map(s => s.trim()).filter(Boolean) : []),
+      notes: c.notes || '',
+      zips: Array.isArray(c.zips) ? c.zips : [],
+      dnc: Array.isArray(c.dnc) ? c.dnc : [],
+      status: c.status || 'Active',
+      statusNote: c.statusNote || '',
+      dailyCap: Number(c.dailyCap) || 6,
+      leadsSentToday: Number(c.leadsSentToday) || 0,
+      oneTimeUnlimitedToday: Boolean(c.oneTimeUnlimitedToday),
+      coolDownMinutes: Number(c.coolDownMinutes) || 2,
+      coolDownEndTime: c.coolDownEndTime || null,
+      timings: c.timings || '09:00 AM - 06:00 PM CST',
+      inScheduleWindow: c.inScheduleWindow !== undefined ? Boolean(c.inScheduleWindow) : true,
+      ratePerLead: Number(c.ratePerLead) || 30
+    }));
+
+    const normalizedLeads = leads.map(l => ({
+      id: l.id || ('LD-' + Math.floor(1000 + Math.random() * 9000)),
+      timestamp: l.timestamp || l.receivedAt || 'Just now',
+      status: l.status || 'Transferred',
+      phone: l.phone || '',
+      name: l.name || 'Unnamed Lead',
+      agentId: l.agentId || '',
+      agentName: l.agentName || '',
+      dob: l.dob || '',
+      age: l.age !== undefined ? l.age : null,
+      address: l.address || '',
+      state: l.state || '',
+      spouse: l.spouse || 'No',
+      autoCarrier: l.autoCarrier || '',
+      lapses: l.lapses || 'No',
+      vehicle: l.vehicle || l.vehicles || '',
+      accidents: l.accidents || 'No',
+      tickets: l.tickets || 'No',
+      homeOwner: l.homeOwner || 'Yes',
+      homeType: l.homeType || 'Single Family',
+      homeCarrier: l.homeCarrier || '',
+      claims: l.claims || l.claims3Yr || 'No',
+      rate: Number(l.rate) || 30,
+      billed: Boolean(l.billed),
+      reassignHistory: l.reassignHistory || '',
+      feedbackStatus: l.feedbackStatus || 'Pending Review',
+      clientComments: Array.isArray(l.clientComments) ? l.clientComments : (Array.isArray(l.comments) ? l.comments : [])
+    }));
+
+    const normalizedInvoices = invoices.map(inv => ({
+      id: inv.id || ('INV-' + Math.floor(100 + Math.random() * 900)),
+      clientId: inv.clientId || '',
+      clientName: inv.clientName || '',
+      period: inv.period || 'Current Cycle',
+      leadCount: Number(inv.leadCount) || 0,
+      rate: Number(inv.rate) || 30,
+      total: Number(inv.total) || 0,
+      dueDate: inv.dueDate || '',
+      status: inv.status || 'Pending',
+      confirmationStatus: inv.confirmationStatus || (inv.status === 'Paid' ? 'Awaiting Confirmation' : 'Not Paid Yet'),
+      confirmedAt: inv.confirmedAt || null,
+      confirmationRef: inv.confirmationRef || null,
+      paymentMethod: inv.paymentMethod || null,
+      clientNote: inv.clientNote || null,
+      items: Array.isArray(inv.items) ? inv.items : (Array.isArray(inv.lineItems) ? inv.lineItems : [])
+    }));
+
+    let selectedId = state.selectedAgentId;
+    if (!normalizedAgents.some(a => a.id === selectedId)) {
+      selectedId = normalizedAgents.length > 0 ? normalizedAgents[0].id : '';
+    }
+
+    return {
+      selectedAgentId: selectedId,
+      agents: normalizedAgents,
+      leads: normalizedLeads,
+      invoices: normalizedInvoices
+    };
+  }
+
+  function buildDriveDbPayload() {
+    return {
+      admin: {
+        loginId: ADMIN_LOGIN_ID,
+        passwordDefault: ADMIN_PASS_DEFAULT,
+        sessionKey: ADMIN_SESSION_KEY,
+        idStorageKey: ADMIN_ID_STORAGE_KEY
+      },
+      clients: state.agents,
+      leads: state.leads,
+      invoices: state.invoices
+    };
+  }
+
+  async function apiAdminSaveDb(db, pin) {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'adminSaveDb', db, pin })
+    });
+    return res.json();
+  }
+
+  async function saveState(syncToDrive = true) {
+    saveLocalStateOnly();
+    if (!syncToDrive) return;
+
+    const pin = getAdminPin();
+    if (!pin) {
+      setSyncIndicator('pin', 'Set Admin PIN');
+      return;
+    }
+
+    isSyncingDrive = true;
+    setSyncIndicator('syncing', 'Saving...');
+    try {
+      const data = await apiAdminSaveDb(buildDriveDbPayload(), pin);
+      if (data && data.ok) {
+        setSyncIndicator('live', 'Live Synced');
+      } else {
+        setSyncIndicator('error', data?.error || 'Sync Failed');
+        showToast(`Google Drive save error: ${data?.error || 'Unauthorized'}`, 'error');
+      }
+    } catch (err) {
+      setSyncIndicator('error', 'Offline / Error');
+      showToast('Could not reach Google Apps Script to save.', 'warning');
+    } finally {
+      isSyncingDrive = false;
+    }
+  }
+
+  async function pullFromDrive(showFeedback = false) {
+    const pin = getAdminPin();
+    if (!pin) {
+      setSyncIndicator('pin', 'Set Admin PIN');
+      if (showFeedback) openAdminPinModal();
+      return;
+    }
+    if (isSyncingDrive) return;
+
+    isSyncingDrive = true;
+    if (showFeedback) setSyncIndicator('syncing', 'Pulling...');
+
+    try {
+      const url = `${API_URL}?role=admin&pin=${encodeURIComponent(pin)}&_t=${Date.now()}`;
+      const res = await fetch(url, { method: 'GET' });
+      const data = await res.json();
+
+      if (data && data.ok && data.db) {
+        applyAdminConfig(data.db);
+        updateAdminGateUI();
+
+        const prevJson = JSON.stringify(buildDriveDbPayload());
+        const nextNormalized = normalizeDbPayload(data.db);
+        const nextJson = JSON.stringify({
+          admin: {
+            loginId: ADMIN_LOGIN_ID,
+            passwordDefault: ADMIN_PASS_DEFAULT,
+            sessionKey: ADMIN_SESSION_KEY,
+            idStorageKey: ADMIN_ID_STORAGE_KEY
+          },
+          clients: nextNormalized.agents,
+          leads: nextNormalized.leads,
+          invoices: nextNormalized.invoices
+        });
+
+        if (prevJson !== nextJson) {
+          state = nextNormalized;
+          saveLocalStateOnly();
+          refreshAllUI();
+          calculateAge();
+          checkDncName();
+          checkPhoneStatus();
+          validateStateMatch();
+        }
+        setSyncIndicator('live', 'Live Synced');
+        if (showFeedback) showToast('Synced latest data from Google Drive.', 'success');
+      } else {
+        setSyncIndicator('error', data?.error || 'Auth Error');
+        if (showFeedback) showToast(`Drive sync error: ${data?.error || 'Unauthorized'}`, 'error');
+      }
+    } catch (err) {
+      setSyncIndicator('error', 'Sync Error');
+      if (showFeedback) showToast('Failed to pull from Google Drive.', 'warning');
+    } finally {
+      isSyncingDrive = false;
+    }
+  }
+
+  function openAdminPinModal() {
+    document.getElementById('admin-pin-input').value = getAdminPin();
+    document.getElementById('admin-pin-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('admin-pin-input').focus(), 50);
+  }
+
+  async function saveAdminPin(e) {
+    e.preventDefault();
+    const pin = document.getElementById('admin-pin-input').value.trim();
+    if (!pin) return;
+    localStorage.setItem(ADMIN_PIN_STORAGE_KEY, pin);
+    closeModal('admin-pin-modal');
+    await pullFromDrive(true);
+  }
+
+  async function resetDemoData() {
+    state = getEmptyState();
+    await saveState(true);
+    refreshAllUI();
+    showToast('Cleared all clients, leads, and invoices (0 clients ready).', 'info');
+  }
+
+  setInterval(() => {
+    const now = Date.now();
+    let stateChanged = false;
+
+    state.agents.forEach(agent => {
+      if (agent.status === 'Cool Time' && agent.coolDownEndTime) {
+        if (agent.coolDownEndTime - now <= 0) {
+          agent.coolDownEndTime = null;
+          agent.status = (!agent.oneTimeUnlimitedToday && agent.leadsSentToday >= agent.dailyCap) ? 'Paused' : 'Active';
+          stateChanged = true;
+          showToast(`Cool-time complete! ${agent.name} is now ${agent.status}.`, 'success');
+        }
+      }
+    });
+
+    if (stateChanged) {
+      saveState(true);
+      refreshAllUI();
+    } else {
+      updateLiveTimersOnly();
+    }
+  }, 1000);
+
+  setInterval(() => {
+    if (!document.hidden && getAdminPin()) {
+      pullFromDrive(false);
+    }
+  }, 7000);
+
+  function formatRemainingSeconds(endTime) {
+    if (!endTime) return '00:00';
+    const diff = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+    const mins = Math.floor(diff / 60);
+    const secs = diff % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }
+
+  function updateLiveTimersOnly() {
+    state.agents.forEach(agent => {
+      if (agent.status === 'Cool Time' && agent.coolDownEndTime) {
+        const timerStr = formatRemainingSeconds(agent.coolDownEndTime);
+        const totalSecs = (agent.coolDownMinutes || 2) * 60;
+        const remSecs = Math.max(0, Math.ceil((agent.coolDownEndTime - Date.now()) / 1000));
+        const pct = Math.min(100, Math.max(0, ((totalSecs - remSecs) / totalSecs) * 100));
+
+        const cardTimer = document.getElementById(`cool-timer-${agent.id}`);
+        if (cardTimer) cardTimer.textContent = timerStr;
+
+        const cardBar = document.getElementById(`cool-bar-${agent.id}`);
+        if (cardBar) cardBar.style.width = `${pct}%`;
+
+        const dashTimer = document.getElementById(`dash-cool-${agent.id}`);
+        if (dashTimer) dashTimer.textContent = `Cool ${timerStr}`;
+
+        if (agent.id === state.selectedAgentId) {
+          const agentCardCool = document.getElementById('agent-card-cool');
+          if (agentCardCool) agentCardCool.textContent = timerStr;
+
+          const bannerTimer = document.getElementById('transfer-banner-timer');
+          if (bannerTimer) bannerTimer.textContent = timerStr;
+        }
+      }
+    });
+  }
+
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      await loadDatabase();
+    } catch (_) {}
+
+    updateAdminGateUI();
+    refreshAllUI();
+    calculateAge();
+    checkDncName();
+    checkPhoneStatus();
+    validateStateMatch();
+
+    if (getAdminPin()) {
+      await pullFromDrive(false);
+    } else {
+      setSyncIndicator('pin', 'Set Admin PIN');
+    }
+  });
+
+  function refreshAllUI() {
+    updateHeaderAndDashboardMetrics();
+    populateAgentSelectors();
+    renderAgentInfoCard();
+    renderClientsStatusGrid();
+    renderSentLeadsTable();
+    renderFeedbackCards();
+    renderInvoicesTable();
+    renderSettingsAgentsList();
+  }
+
+  function updateHeaderAndDashboardMetrics() {
+    const totalClients = state.agents.length;
+    const activeCount = state.agents.filter(a => a.status === 'Active').length;
+    const coolCount = state.agents.filter(a => a.status === 'Cool Time').length;
+    const pausedCount = state.agents.filter(a => a.status === 'Paused').length;
+
+    const totalSentToday = state.agents.reduce((sum, a) => sum + (a.leadsSentToday || 0), 0);
+    const totalCapToday = state.agents.reduce((sum, a) => sum + (a.dailyCap || 0), 0);
+    const capPct = totalCapToday > 0 ? Math.min(100, Math.round((totalSentToday / totalCapToday) * 100)) : 0;
+
+    const pendingInvoices = state.invoices.filter(i => i.status !== 'Paid' || i.confirmationStatus === 'Awaiting Confirmation');
+    const unpaidOrUnconfirmedInvoices = state.invoices.filter(i => i.status !== 'Paid');
+    const pendingAmount = unpaidOrUnconfirmedInvoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+    const confirmedPaidTotal = state.invoices
+      .filter(i => i.status === 'Paid' && i.confirmationStatus === 'Confirmed by Daily Lead Log')
+      .reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+
+    const disputeCount = state.leads.filter(l => l.feedbackStatus === 'Disputed / Replacement').length;
+
+    document.getElementById('hdr-quick-active').textContent = activeCount;
+    document.getElementById('hdr-quick-cool').textContent = coolCount;
+    document.getElementById('hdr-quick-cap').textContent = `${totalSentToday} / ${totalCapToday}`;
+
+    document.getElementById('badge-clients-status').textContent = `${activeCount} Act • ${coolCount} Cool • ${pausedCount} Paused`;
+    document.getElementById('badge-sent-count').textContent = state.leads.length;
+    document.getElementById('badge-feedback-count').textContent = state.leads.length;
+    document.getElementById('badge-invoices-summary').textContent = `${pendingInvoices.length} • $${pendingAmount}`;
+
+    document.getElementById('dash-kpi-clients').textContent = `${activeCount} Active / ${totalClients} Total`;
+    document.getElementById('dash-kpi-clients-sub').textContent = `${coolCount} Cool-Time • ${pausedCount} Paused`;
+    document.getElementById('dash-kpi-cap').textContent = `${totalSentToday} / ${totalCapToday}`;
+    document.getElementById('dash-kpi-cap-bar').style.width = `${capPct}%`;
+    document.getElementById('dash-kpi-sent').textContent = state.leads.length;
+    document.getElementById('dash-kpi-feedback').textContent = `${state.leads.length} Leads`;
+    document.getElementById('dash-kpi-disputes').textContent = `${disputeCount} Disputed / Replacement`;
+    document.getElementById('dash-kpi-invoices').textContent = `$${pendingAmount.toFixed(2)}`;
+    document.getElementById('dash-kpi-invoices-sub').textContent = `${unpaidOrUnconfirmedInvoices.length} unpaid • $${confirmedPaidTotal.toFixed(2)} confirmed`;
+
+    document.getElementById('cs-total-clients').textContent = totalClients;
+    document.getElementById('cs-active-clients').textContent = activeCount;
+    document.getElementById('cs-cool-clients').textContent = coolCount;
+    document.getElementById('cs-paused-clients').textContent = pausedCount;
+    document.getElementById('cs-daily-cap').textContent = `${totalSentToday} / ${totalCapToday}`;
+    document.getElementById('cs-daily-cap-bar').style.width = `${capPct}%`;
+
+    const snapContainer = document.getElementById('dash-client-snapshot');
+    if (state.agents.length === 0) {
+      snapContainer.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">No clients added yet. Go to <button onclick="switchTab('settings')" class="text-indigo-600 font-semibold underline cursor-pointer">Settings</button> to add your first client.</div>`;
+    } else {
+      snapContainer.innerHTML = state.agents.map(a => {
+        let badge = `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Active</span>`;
+        if (a.status === 'Cool Time') {
+          badge = `<span id="dash-cool-${a.id}" class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 font-mono">Cool ${formatRemainingSeconds(a.coolDownEndTime)}</span>`;
+        } else if (a.status === 'Paused') {
+          badge = `<span class="px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Paused</span>`;
+        }
+        const capText = a.oneTimeUnlimitedToday ? `${a.leadsSentToday} / Unlimited` : `${a.leadsSentToday}/${a.dailyCap}`;
+        return `
+          <div class="px-5 py-3 flex items-center justify-between text-xs">
+            <div>
+              <p class="font-bold text-slate-900">${escapeHtml(a.name)} <span class="text-slate-400 font-normal">(${escapeHtml(a.states.join(', ') || 'No State')})</span></p>
+              <p class="text-[11px] text-slate-500 mt-0.5">Cap: <strong>${escapeHtml(capText)}</strong> • ${escapeHtml(a.timings)}</p>
+            </div>
+            <div class="flex items-center gap-2">${badge}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    const recentLeadsContainer = document.getElementById('dash-recent-leads');
+    if (state.leads.length === 0) {
+      recentLeadsContainer.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">No leads transferred yet.</div>`;
+    } else {
+      recentLeadsContainer.innerHTML = state.leads.slice(0, 4).map(l => {
+        const lastComment = l.clientComments && l.clientComments.length ? l.clientComments[l.clientComments.length - 1].text : 'No client comment yet.';
+        return `
+          <div class="px-5 py-3 flex items-start justify-between gap-3 text-xs">
+            <div class="space-y-0.5">
+              <p class="font-bold text-slate-900">${escapeHtml(l.name)} <span class="font-mono text-slate-500 font-normal">(${escapeHtml(l.phone)})</span> → <span class="text-indigo-600">${escapeHtml(l.agentName)}</span></p>
+              <p class="text-slate-500 italic line-clamp-1">"${escapeHtml(lastComment)}"</p>
+            </div>
+            <button onclick="openEditSentModal('${l.id}')" class="shrink-0 px-2.5 py-1 rounded-lg border border-slate-200 hover:bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer">Edit</button>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  function switchTab(tabName) {
+    const tabs = ['dashboard', 'transfer', 'clients', 'sent', 'feedback', 'invoices', 'settings'];
+    tabs.forEach(t => {
+      document.getElementById(`view-${t}`).classList.add('hidden');
+      const btn = document.getElementById(`nav-${t}`);
+      btn.classList.remove('bg-indigo-600', 'text-white', 'font-semibold', 'shadow-sm');
+      btn.classList.add('text-slate-300', 'font-medium');
+    });
+
+    document.getElementById(`view-${tabName}`).classList.remove('hidden');
+    const activeBtn = document.getElementById(`nav-${tabName}`);
+    activeBtn.classList.add('bg-indigo-600', 'text-white', 'font-semibold', 'shadow-sm');
+    activeBtn.classList.remove('text-slate-300', 'font-medium');
+  }
+
+  function toggleUserMenu() {
+    document.getElementById('user-dropdown').classList.toggle('hidden');
+  }
+
+  document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('user-dropdown');
+    if (dropdown && !e.target.closest('#user-dropdown') && !e.target.closest('button[onclick="toggleUserMenu()"]')) {
+      dropdown.classList.add('hidden');
+    }
+  });
+
+  function handleLogout() {
+    document.getElementById('user-dropdown').classList.add('hidden');
+    sessionStorage.removeItem(ADMIN_SESSION_KEY);
+    localStorage.removeItem(ADMIN_PIN_STORAGE_KEY);
+    updateAdminGateUI();
+    setSyncIndicator('pin', 'Set Admin PIN');
+    showToast('Signed out & cleared saved PIN.', 'info');
+  }
+
+  function populateAgentSelectors() {
+    const infoSelect = document.getElementById('agent-info-selector');
+    const leadSelect = document.getElementById('lead-agent-select');
+    if (!infoSelect || !leadSelect) return;
+
+    infoSelect.innerHTML = '';
+    leadSelect.innerHTML = '';
+
+    if (state.agents.length === 0) {
+      infoSelect.add(new Option('No clients added yet — Add in Settings', ''));
+      leadSelect.add(new Option('No clients added yet — Add in Settings', ''));
+      state.selectedAgentId = '';
+      return;
+    }
+
+    state.agents.forEach(agent => {
+      const statusTag = agent.status === 'Active' ? '🟢 Active' : (agent.status === 'Cool Time' ? '🟡 Cool-Time' : '🔴 Paused');
+      const capLabel = agent.oneTimeUnlimitedToday ? `${agent.leadsSentToday}/∞` : `${agent.leadsSentToday}/${agent.dailyCap}`;
+      const label = `${agent.name}, ${agent.states.join('/') || 'No State'} [${statusTag} • ${capLabel}]`;
+      infoSelect.add(new Option(label, agent.id));
+      leadSelect.add(new Option(label, agent.id));
+    });
+
+    if (!state.agents.some(a => a.id === state.selectedAgentId)) {
+      state.selectedAgentId = state.agents[0].id;
+    }
+    infoSelect.value = state.selectedAgentId;
+    leadSelect.value = state.selectedAgentId;
+  }
+
+  function handleAgentChange(agentId) {
+    state.selectedAgentId = agentId;
+    saveLocalStateOnly();
+    document.getElementById('agent-info-selector').value = agentId;
+    document.getElementById('lead-agent-select').value = agentId;
+    renderAgentInfoCard();
+    checkDncName();
+    validateStateMatch();
+  }
+
+  function renderAgentInfoCard() {
+    const noClientsBanner = document.getElementById('no-clients-banner');
+    const agent = state.agents.find(a => a.id === state.selectedAgentId) || null;
+
+    if (!agent) {
+      if (noClientsBanner) noClientsBanner.classList.remove('hidden');
+      document.getElementById('agent-display-name').textContent = 'No Client Added';
+      document.getElementById('agent-uuid-display').textContent = 'No client selected';
+      document.getElementById('agent-display-notes').textContent = 'Add a client in Settings to view verifier rules and eligibility notes.';
+      document.getElementById('agent-card-cap').textContent = '0 / 0';
+      document.getElementById('agent-card-cool').textContent = '—';
+      document.getElementById('agent-card-rate').textContent = '$0';
+      document.getElementById('agent-card-timings').textContent = '—';
+      document.getElementById('agent-card-status-pill').className = 'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200';
+      document.getElementById('agent-card-status-pill').textContent = 'No Client';
+      document.getElementById('agent-display-states').innerHTML = `<span class="text-xs text-slate-400">—</span>`;
+      document.getElementById('agent-display-zips').innerHTML = `<span class="text-xs text-slate-400">No zips configured</span>`;
+      document.getElementById('agent-display-dnc').innerHTML = `<span class="text-xs text-slate-400">No DNC persons configured</span>`;
+      document.getElementById('transfer-agent-alert-banner').classList.add('hidden');
+      return;
+    }
+
+    if (noClientsBanner) noClientsBanner.classList.add('hidden');
+
+    document.getElementById('agent-display-name').textContent = agent.name;
+    document.getElementById('agent-uuid-display').textContent = agent.id;
+    document.getElementById('agent-display-notes').textContent = agent.notes || 'No verifier notes set.';
+    document.getElementById('agent-card-cap').textContent = agent.oneTimeUnlimitedToday ? `${agent.leadsSentToday} / ∞` : `${agent.leadsSentToday} / ${agent.dailyCap}`;
+    document.getElementById('agent-card-rate').textContent = `$${agent.ratePerLead}`;
+    document.getElementById('agent-card-timings').textContent = agent.timings;
+
+    const statusPill = document.getElementById('agent-card-status-pill');
+    const coolLabel = document.getElementById('agent-card-cool');
+    const alertBanner = document.getElementById('transfer-agent-alert-banner');
+
+    if (agent.status === 'Active') {
+      statusPill.className = 'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200';
+      statusPill.textContent = 'Active • Accepting Calls';
+      coolLabel.className = 'text-sm font-extrabold text-emerald-400';
+      coolLabel.textContent = 'Ready';
+      alertBanner.classList.add('hidden');
+    } else if (agent.status === 'Cool Time') {
+      const rem = formatRemainingSeconds(agent.coolDownEndTime);
+      statusPill.className = 'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200';
+      statusPill.textContent = 'Cool-Time Buffer';
+      coolLabel.className = 'text-sm font-extrabold text-amber-400 font-mono';
+      coolLabel.textContent = rem;
+
+      alertBanner.className = 'rounded-2xl p-4 border bg-amber-50 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+      alertBanner.innerHTML = `
+        <div class="flex items-center gap-3">
+          <span class="material-symbols-outlined text-amber-600 text-[24px]">timer</span>
+          <div>
+            <p class="text-sm font-bold">Cool-Time Active for ${escapeHtml(agent.name)} — Wait <span id="transfer-banner-timer" class="font-mono underline">${rem}</span> before connecting next lead!</p>
+            <p class="text-xs text-amber-800">Configured ${agent.coolDownMinutes}-minute cool-down buffer after receiving a transfer.</p>
+          </div>
+        </div>
+        <button type="button" onclick="overrideCoolDown('${agent.id}')" class="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shrink-0 cursor-pointer">Override & Set Active</button>
+      `;
+      alertBanner.classList.remove('hidden');
+    } else {
+      statusPill.className = 'text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200';
+      statusPill.textContent = 'Paused';
+      coolLabel.className = 'text-sm font-extrabold text-rose-400';
+      coolLabel.textContent = 'Paused';
+
+      alertBanner.className = 'rounded-2xl p-4 border bg-rose-50 border-rose-300 text-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+      alertBanner.innerHTML = `
+        <div class="flex items-center gap-3">
+          <span class="material-symbols-outlined text-rose-600 text-[24px]">pause_circle</span>
+          <div>
+            <p class="text-sm font-bold">${escapeHtml(agent.name)} is currently PAUSED (${agent.leadsSentToday}/${agent.dailyCap} Daily Cap)</p>
+            <p class="text-xs text-rose-800">Select another active client or resume this client in Clients Status before transferring.</p>
+          </div>
+        </div>
+        <button type="button" onclick="toggleClientPause('${agent.id}')" class="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shrink-0 cursor-pointer">Resume Client Now</button>
+      `;
+      alertBanner.classList.remove('hidden');
+    }
+
+    document.getElementById('agent-display-states').innerHTML = (agent.states && agent.states.length)
+      ? agent.states.map(st => `<span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">${escapeHtml(st)}</span>`).join('')
+      : `<span class="text-xs text-slate-400">—</span>`;
+
+    document.getElementById('agent-display-zips').innerHTML = (agent.zips && agent.zips.length)
+      ? agent.zips.map(z => `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-slate-100 text-slate-700 border border-slate-200">${escapeHtml(z)}</span>`).join('')
+      : `<span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600">All Approved Zips</span>`;
+
+    document.getElementById('agent-display-dnc').innerHTML = (agent.dnc && agent.dnc.length)
+      ? agent.dnc.map(person => `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-white text-rose-700 border border-rose-200"><span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>${escapeHtml(person)}</span>`).join('')
+      : `<span class="text-xs text-slate-500">No restricted persons listed.</span>`;
+  }
+
+  function checkPhoneStatus(manualClick = false) {
+    const raw = document.getElementById('lead-phone').value.replace(/\D/g, '');
+    const historyBadge = document.getElementById('transfer-history-badge');
+    const tcpaBadge = document.getElementById('tcpa-badge');
+
+    const existing = state.leads.find(l => l.phone.replace(/\D/g, '') === raw && raw.length >= 7);
+    if (existing) {
+      historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200';
+      historyBadge.textContent = `Logged: ${existing.status} (${existing.agentName})`;
+    } else {
+      historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200';
+      historyBadge.textContent = 'No transfer found.';
+    }
+
+    if (raw.endsWith('0000') && raw.length >= 7) {
+      tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
+      tcpaBadge.textContent = 'TCPA: Litigator Alert';
+    } else {
+      tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+      tcpaBadge.textContent = 'TCPA: clean';
+    }
+
+    if (manualClick) {
+      showToast(raw.length >= 10 ? 'Scrubber verified: TCPA Clean.' : 'Enter a valid 10-digit phone number.', raw.length >= 10 ? 'success' : 'warning');
+    }
+  }
+
+  function checkDncName() {
+    const nameVal = document.getElementById('lead-name').value.trim().toLowerCase();
+    const agent = state.agents.find(a => a.id === state.selectedAgentId);
+    const alertBadge = document.getElementById('dnc-name-alert');
+    const nameInput = document.getElementById('lead-name');
+
+    if (!agent || !nameVal || !Array.isArray(agent.dnc)) {
+      alertBadge.classList.add('hidden');
+      nameInput.classList.remove('border-rose-500', 'bg-rose-50/30');
+      return false;
+    }
+
+    const isDnc = agent.dnc.some(d => d.toLowerCase() === nameVal);
+    if (isDnc) {
+      alertBadge.classList.remove('hidden');
+      nameInput.classList.add('border-rose-500', 'bg-rose-50/30');
+      return true;
+    }
+    alertBadge.classList.add('hidden');
+    nameInput.classList.remove('border-rose-500', 'bg-rose-50/30');
+    return false;
+  }
+
+  function calculateAge() {
+    const dobStr = document.getElementById('lead-dob').value.trim();
+    const ageBadge = document.getElementById('age-badge');
+    if (!dobStr) {
+      ageBadge.textContent = 'Enter DOB';
+      ageBadge.className = 'text-[11px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200';
+      return null;
+    }
+    const parsedDate = new Date(dobStr);
+    if (isNaN(parsedDate.getTime())) {
+      ageBadge.textContent = 'Check Format';
+      ageBadge.className = 'text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200';
+      return null;
+    }
+    const today = new Date();
+    let age = today.getFullYear() - parsedDate.getFullYear();
+    const m = today.getMonth() - parsedDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < parsedDate.getDate())) age--;
+
+    if (age >= 75) {
+      ageBadge.textContent = `Age: ${age} (Over 75 Limit!)`;
+      ageBadge.className = 'text-[11px] font-bold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200';
+    } else {
+      ageBadge.textContent = `Age: ${age} (Eligible)`;
+      ageBadge.className = 'text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+    }
+    return age;
+  }
+
+  function validateStateMatch() {
+    const selectedStateFull = document.getElementById('lead-state').value;
+    const agent = state.agents.find(a => a.id === state.selectedAgentId);
+    const badge = document.getElementById('state-match-badge');
+    if (!agent) {
+      badge.textContent = 'No Client';
+      badge.className = 'text-[11px] font-semibold text-slate-400';
+      return;
+    }
+
+    const matches = agent.states.some(st => selectedStateFull.toLowerCase().includes(st.toLowerCase()));
+    if (matches) {
+      badge.textContent = 'State Match ✓';
+      badge.className = 'text-[11px] font-semibold text-emerald-600';
+    } else {
+      badge.textContent = `Licensed: ${agent.states.join(', ') || 'None'}`;
+      badge.className = 'text-[11px] font-semibold text-amber-600';
+    }
+  }
+
+  async function submitLead(statusType) {
+    const phone = document.getElementById('lead-phone').value.trim();
+    const name = document.getElementById('lead-name').value.trim();
+    const address = document.getElementById('lead-address').value.trim();
+
+    if (!phone || !name) {
+      showToast('Please enter at least Phone Number and Full Name.', 'error');
+      return;
+    }
+
+    if (state.agents.length === 0) {
+      showToast('Add a client in Settings first before assigning or transferring leads.', 'warning');
+      switchTab('settings');
+      return;
+    }
+
+    const agent = state.agents.find(a => a.id === state.selectedAgentId) || state.agents[0];
+
+    if (statusType === 'Transferred') {
+      if (checkDncName()) {
+        showToast(`BLOCKED: "${name}" is on ${agent.name}'s DNC list!`, 'error');
+        return;
+      }
+      if (agent.status === 'Paused') {
+        showToast(`BLOCKED: ${agent.name} is PAUSED (${agent.leadsSentToday}/${agent.dailyCap} cap). Resume or pick another client.`, 'error');
+        return;
+      }
+      if (agent.status === 'Cool Time') {
+        const rem = formatRemainingSeconds(agent.coolDownEndTime);
+        showToast(`WAIT: ${agent.name} is on Cool-Time (${rem} left). Override or pick another active client.`, 'warning');
+        return;
+      }
+    }
+
+    const age = calculateAge();
+    const newLead = {
+      id: 'LD-' + (1095 + state.leads.length),
+      timestamp: 'Just now',
+      status: statusType,
+      phone,
+      name,
+      agentId: agent.id,
+      agentName: agent.name,
+      dob: document.getElementById('lead-dob').value.trim(),
+      age,
+      address,
+      state: document.getElementById('lead-state').value,
+      spouse: document.getElementById('lead-spouse').value,
+      autoCarrier: document.getElementById('auto-carrier').value.trim(),
+      lapses: document.getElementById('auto-lapses').value,
+      vehicle: document.getElementById('auto-vehicle').value.trim(),
+      accidents: document.getElementById('auto-accidents').value,
+      tickets: document.getElementById('auto-tickets').value,
+      homeOwner: document.getElementById('home-owner').value,
+      homeType: document.getElementById('home-type').value,
+      homeCarrier: document.getElementById('home-carrier').value.trim(),
+      claims: document.getElementById('home-claims').value,
+      rate: agent.ratePerLead,
+      billed: false,
+      reassignHistory: '',
+      feedbackStatus: 'Pending Review',
+      clientComments: []
+    };
+
+    state.leads.unshift(newLead);
+
+    if (statusType === 'Transferred') {
+      agent.leadsSentToday = (agent.leadsSentToday || 0) + 1;
+      agent.status = 'Cool Time';
+      agent.coolDownEndTime = Date.now() + (agent.coolDownMinutes || 2) * 60 * 1000;
+    }
+
+    refreshAllUI();
+    await saveState(true);
+
+    if (statusType === 'Transferred') {
+      showToast(`Transferred to ${agent.name} & synced to Drive!`, 'success');
+      openSummaryModal(newLead);
+    } else if (statusType === 'Call Back') {
+      showToast(`Call Back logged for ${name}.`, 'warning');
+    } else {
+      showToast(`Lead saved to Sent / Drafts log.`, 'info');
+    }
+  }
+
+  function resetLeadForm() {
+    ['lead-phone', 'lead-name', 'lead-dob', 'lead-address', 'auto-carrier', 'auto-vehicle', 'home-carrier'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('lead-spouse').value = 'No';
+    document.getElementById('auto-lapses').value = 'No';
+    document.getElementById('auto-accidents').value = 'No';
+    document.getElementById('auto-tickets').value = 'No';
+    document.getElementById('home-owner').value = 'Yes';
+    document.getElementById('home-type').value = 'Single Family';
+    document.getElementById('home-claims').value = 'No';
+    calculateAge();
+    checkDncName();
+    checkPhoneStatus();
+    showToast('Form cleared for next call.', 'info');
+  }
+
+  function renderClientsStatusGrid() {
+    const grid = document.getElementById('clients-status-grid');
+    if (!grid) return;
+
+    if (state.agents.length === 0) {
+      grid.innerHTML = `
+        <div class="col-span-full bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
+          <p class="text-sm font-bold text-slate-800">No clients added yet</p>
+          <p class="text-xs text-slate-500">Add your first client in Settings to monitor live caps, cool-down timers, and active status.</p>
+          <button onclick="switchTab('settings')" class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer">
+            <span class="material-symbols-outlined text-[16px]">person_add</span>
+            <span>Go to Settings</span>
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = state.agents.map(agent => {
+      const capPct = agent.oneTimeUnlimitedToday ? 100 : (agent.dailyCap > 0 ? Math.min(100, Math.round((agent.leadsSentToday / agent.dailyCap) * 100)) : 0);
+      const isCool = agent.status === 'Cool Time';
+      const isPaused = agent.status === 'Paused';
+
+      let borderClass = 'border-slate-200';
+      let badgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Active</span>`;
+
+      if (isCool) {
+        borderClass = 'border-amber-300 ring-2 ring-amber-500/10';
+        badgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300"><span class="material-symbols-outlined text-[14px]">timer</span>Cool-Time</span>`;
+      } else if (isPaused) {
+        borderClass = 'border-rose-200 bg-rose-50/10';
+        badgeHtml = `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200"><span class="material-symbols-outlined text-[14px]">pause_circle</span>Paused</span>`;
+      }
+
+      const coolBoxHtml = isCool
+        ? `
+          <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-amber-900 flex items-center gap-1">
+                <span class="material-symbols-outlined text-[16px] text-amber-600">hourglass_top</span>
+                ${agent.coolDownMinutes}-Min Cool-Time Buffer
+              </span>
+              <span id="cool-timer-${agent.id}" class="font-mono text-base font-extrabold text-amber-700">${formatRemainingSeconds(agent.coolDownEndTime)}</span>
+            </div>
+            <div class="w-full bg-amber-200/70 h-2 rounded-full overflow-hidden">
+              <div id="cool-bar-${agent.id}" class="bg-amber-500 h-full transition-all duration-500" style="width: 25%"></div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-amber-800">
+              <span>Wait before connecting next lead</span>
+              <button onclick="overrideCoolDown('${agent.id}')" class="font-bold underline hover:text-amber-950 cursor-pointer">Skip / Ready Now</button>
+            </div>
+          </div>
+        `
+        : `
+          <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
+            <span class="text-slate-600 font-medium">Cool-Time Rule (${agent.coolDownMinutes}m after lead)</span>
+            <button onclick="triggerManualCoolDown('${agent.id}')" class="px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-amber-50 hover:border-amber-300 text-slate-700 font-semibold text-[11px] cursor-pointer">Trigger ${agent.coolDownMinutes}m Cool</button>
+          </div>
+        `;
+
+      const capDisplay = agent.oneTimeUnlimitedToday ? `${agent.leadsSentToday} / Unlimited Today` : `${agent.leadsSentToday} / ${agent.dailyCap} Leads`;
+
+      return `
+        <div class="bg-white rounded-2xl border ${borderClass} p-5 shadow-2xs flex flex-col justify-between space-y-4">
+          <div class="space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <h3 class="font-bold text-slate-900 text-base">${escapeHtml(agent.name)}</h3>
+                <p class="text-xs text-slate-500 mt-0.5">${escapeHtml(agent.states.join(', ') || 'No State')} • <span class="font-semibold text-slate-700">$${agent.ratePerLead}/lead</span></p>
+              </div>
+              ${badgeHtml}
+            </div>
+            <div class="flex items-center gap-2 text-xs bg-indigo-50/70 text-indigo-900 px-3 py-2 rounded-xl border border-indigo-100">
+              <span class="material-symbols-outlined text-[16px] text-indigo-600">schedule</span>
+              <span class="font-semibold">${escapeHtml(agent.timings)}</span>
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-semibold text-slate-600">Daily Cap Today</span>
+                <div class="flex items-center gap-1.5">
+                  <span class="font-extrabold text-slate-900">${escapeHtml(capDisplay)}</span>
+                  ${!agent.oneTimeUnlimitedToday ? `
+                    <button onclick="adjustClientCap('${agent.id}', 1)" title="Increase Cap by 1" class="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer">+</button>
+                    <button onclick="adjustClientCap('${agent.id}', -1)" title="Decrease Cap by 1" class="w-5 h-5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center cursor-pointer">-</button>
+                  ` : ''}
+                </div>
+              </div>
+              <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                <div class="${agent.oneTimeUnlimitedToday ? 'bg-emerald-500' : (capPct >= 100 ? 'bg-rose-500' : 'bg-indigo-600')} h-full rounded-full transition-all" style="width: ${capPct}%"></div>
+              </div>
+            </div>
+            ${coolBoxHtml}
+          </div>
+          <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+            <button onclick="toggleClientPause('${agent.id}')" class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border ${isPaused ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'} text-xs font-semibold cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">${isPaused ? 'play_arrow' : 'pause'}</span>
+              <span>${isPaused ? 'Resume Client' : 'Pause Client'}</span>
+            </button>
+            <button onclick="jumpToTransferForClient('${agent.id}')" class="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-2xs cursor-pointer">
+              <span class="material-symbols-outlined text-[16px]">send</span>
+              <span>Send Lead</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function triggerManualCoolDown(agentId) {
+    const agent = state.agents.find(a => a.id === agentId);
+    if (!agent) return;
+    agent.status = 'Cool Time';
+    agent.coolDownEndTime = Date.now() + (agent.coolDownMinutes || 2) * 60 * 1000;
+    refreshAllUI();
+    await saveState(true);
+    showToast(`Started ${agent.coolDownMinutes}-minute Cool-Time for ${agent.name}.`, 'warning');
+  }
+
+  async function overrideCoolDown(agentId) {
+    const agent = state.agents.find(a => a.id === agentId);
+    if (!agent) return;
+    agent.coolDownEndTime = null;
+    agent.status = (!agent.oneTimeUnlimitedToday && agent.leadsSentToday >= agent.dailyCap) ? 'Paused' : 'Active';
+    refreshAllUI();
+    await saveState(true);
+    showToast(`${agent.name} Cool-Time cleared (${agent.status}).`, 'success');
+  }
+
+  async function toggleClientPause(agentId) {
+    const agent = state.agents.find(a => a.id === agentId);
+    if (!agent) return;
+    if (agent.status === 'Paused') {
+      agent.status = 'Active';
+      agent.coolDownEndTime = null;
+      if (!agent.oneTimeUnlimitedToday && agent.leadsSentToday >= agent.dailyCap) agent.dailyCap += 2;
+      showToast(`${agent.name} is now Active.`, 'success');
+    } else {
+      agent.status = 'Paused';
+      agent.coolDownEndTime = null;
+      showToast(`${agent.name} has been Paused.`, 'info');
+    }
+    refreshAllUI();
+    await saveState(true);
+  }
+
+  async function adjustClientCap(agentId, delta) {
+    const agent = state.agents.find(a => a.id === agentId);
+    if (!agent) return;
+    agent.dailyCap = Math.max(1, agent.dailyCap + delta);
+    if (!agent.oneTimeUnlimitedToday) {
+      if (agent.leadsSentToday < agent.dailyCap && agent.status === 'Paused') agent.status = 'Active';
+      else if (agent.leadsSentToday >= agent.dailyCap && agent.status === 'Active') agent.status = 'Paused';
+    }
+    refreshAllUI();
+    await saveState(true);
+  }
+
+  function jumpToTransferForClient(agentId) {
+    handleAgentChange(agentId);
+    switchTab('transfer');
+  }
+
+  function renderSentLeadsTable() {
+    const tbody = document.getElementById('sent-leads-tbody');
+    if (!tbody) return;
+    const q = (document.getElementById('sent-search')?.value || '').trim().toLowerCase();
+
+    const filtered = state.leads.filter(l =>
+      !q ||
+      l.name.toLowerCase().includes(q) ||
+      l.phone.includes(q) ||
+      l.agentName.toLowerCase().includes(q) ||
+      l.state.toLowerCase().includes(q)
+    );
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" class="py-10 text-center text-slate-400 text-sm">No sent leads found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(l => {
+      const statusBadge = l.status === 'Transferred'
+        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        : (l.status === 'Call Back' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200');
+
+      return `
+        <tr class="hover:bg-slate-50/80 transition-colors">
+          <td class="py-3.5 px-4">
+            <p class="font-bold text-slate-900">${escapeHtml(l.name)}</p>
+            <p class="text-xs text-slate-400">${escapeHtml(l.id)} • ${escapeHtml(l.timestamp)}</p>
+            ${l.reassignHistory ? `<span class="inline-block mt-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">${escapeHtml(l.reassignHistory)}</span>` : ''}
+          </td>
+          <td class="py-3.5 px-4">
+            <p class="font-mono text-xs font-bold text-slate-800">${escapeHtml(l.phone)}</p>
+            <p class="text-xs text-slate-500">${escapeHtml(l.state)}</p>
+          </td>
+          <td class="py-3.5 px-4">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">${escapeHtml(l.agentName)}</span>
+          </td>
+          <td class="py-3.5 px-4 text-xs text-slate-600">
+            <p class="font-semibold text-slate-800">${escapeHtml(l.autoCarrier || 'N/A')} • ${escapeHtml(l.vehicle || 'N/A')}</p>
+            <p class="text-slate-400">Homeowner: ${escapeHtml(l.homeOwner)} (${escapeHtml(l.homeType)})</p>
+          </td>
+          <td class="py-3.5 px-4">
+            <span class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusBadge}">${escapeHtml(l.status)}</span>
+            <p class="text-xs font-semibold text-slate-500 mt-1">$${l.rate || 30} ${l.billed ? '• Billed' : '• Unbilled'}</p>
+          </td>
+          <td class="py-3.5 px-4 text-right">
+            <div class="inline-flex flex-wrap justify-end gap-1.5">
+              <button onclick="openEditSentModal('${l.id}')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer">
+                <span class="material-symbols-outlined text-[15px]">edit</span>
+                <span>Edit Form</span>
+              </button>
+              <button onclick="openResendModal('${l.id}')" class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold shadow-2xs cursor-pointer">
+                <span class="material-symbols-outlined text-[15px]">forward_to_inbox</span>
+                <span>Resend / Reassign</span>
+              </button>
+              <button onclick="viewLeadSummary('${l.id}')" title="Copy Summary" class="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 cursor-pointer">
+                <span class="material-symbols-outlined text-[16px]">content_copy</span>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openEditSentModal(leadId) {
+    const lead = state.leads.find(l => l.id === leadId);
+    if (!lead) return;
+    document.getElementById('edit-sent-id').value = lead.id;
+    document.getElementById('edit-sent-modal-title').textContent = `Edit Sent Form — ${lead.name} (${lead.id})`;
+    document.getElementById('es-name').value = lead.name;
+    document.getElementById('es-phone').value = lead.phone;
+    document.getElementById('es-dob').value = lead.dob || '';
+    document.getElementById('es-state').value = lead.state || '';
+    document.getElementById('es-address').value = lead.address || '';
+    document.getElementById('es-auto-carrier').value = lead.autoCarrier || '';
+    document.getElementById('es-vehicle').value = lead.vehicle || '';
+    document.getElementById('es-home-owner').value = lead.homeOwner || 'Yes';
+    document.getElementById('es-home-type').value = lead.homeType || 'Single Family';
+    document.getElementById('es-home-carrier').value = lead.homeCarrier || '';
+    document.getElementById('edit-sent-modal').classList.remove('hidden');
+  }
+
+  async function saveEditedSentLead(e) {
+    e.preventDefault();
+    const id = document.getElementById('edit-sent-id').value;
+    const lead = state.leads.find(l => l.id === id);
+    if (!lead) return;
+
+    lead.name = document.getElementById('es-name').value.trim();
+    lead.phone = document.getElementById('es-phone').value.trim();
+    lead.dob = document.getElementById('es-dob').value.trim();
+    lead.state = document.getElementById('es-state').value.trim();
+    lead.address = document.getElementById('es-address').value.trim();
+    lead.autoCarrier = document.getElementById('es-auto-carrier').value.trim();
+    lead.vehicle = document.getElementById('es-vehicle').value.trim();
+    lead.homeOwner = document.getElementById('es-home-owner').value;
+    lead.homeType = document.getElementById('es-home-type').value.trim();
+    lead.homeCarrier = document.getElementById('es-home-carrier').value.trim();
+
+    refreshAllUI();
+    await saveState(true);
+    closeModal('edit-sent-modal');
+    showToast(`Updated form for ${lead.name} & synced to Drive.`, 'success');
+    openSummaryModal(lead);
+  }
+
+  function openResendModal(leadId) {
+    const lead = state.leads.find(l => l.id === leadId);
+    if (!lead) return;
+
+    document.getElementById('resend-lead-id').value = lead.id;
+    document.getElementById('resend-lead-name').textContent = `${lead.name} (${lead.phone}) • ${lead.state}`;
+    document.getElementById('resend-current-client').textContent = `Currently assigned to: ${lead.agentName}`;
+    document.getElementById('resend-note').value = '';
+
+    const targetSelect = document.getElementById('resend-target-client');
+    targetSelect.innerHTML = '';
+    state.agents.forEach(a => {
+      if (a.id !== lead.agentId) {
+        targetSelect.add(new Option(`${a.name} (${a.states.join(', ') || 'No State'}) — ${a.status} [${a.leadsSentToday}/${a.dailyCap}]`, a.id));
+      }
+    });
+
+    if (targetSelect.options.length === 0) {
+      showToast('Add another client in Settings first to reassign this lead.', 'warning');
+      return;
+    }
+
+    document.getElementById('resend-modal').classList.remove('hidden');
+  }
+
+  async function confirmResendLead(e) {
+    e.preventDefault();
+    const leadId = document.getElementById('resend-lead-id').value;
+    const newAgentId = document.getElementById('resend-target-client').value;
+    const note = document.getElementById('resend-note').value.trim();
+
+    const lead = state.leads.find(l => l.id === leadId);
+    const oldAgent = state.agents.find(a => a.id === lead?.agentId);
+    const newAgent = state.agents.find(a => a.id === newAgentId);
+    if (!lead || !newAgent) return;
+
+    if (oldAgent && oldAgent.leadsSentToday > 0) oldAgent.leadsSentToday -= 1;
+    newAgent.leadsSentToday = (newAgent.leadsSentToday || 0) + 1;
+    newAgent.status = 'Cool Time';
+    newAgent.coolDownEndTime = Date.now() + (newAgent.coolDownMinutes || 2) * 60 * 1000;
+
+    const prevName = lead.agentName;
+    lead.agentId = newAgent.id;
+    lead.agentName = newAgent.name;
+    lead.rate = newAgent.ratePerLead;
+    lead.timestamp = 'Resent just now';
+    lead.reassignHistory = `Reassigned from ${prevName} → ${newAgent.name}${note ? ` (${note})` : ''}`;
+
+    refreshAllUI();
+    await saveState(true);
+    closeModal('resend-modal');
+    showToast(`Lead reassigned & resent to ${newAgent.name}!`, 'success');
+    openSummaryModal(lead);
+  }
+
+  function setFeedbackFilter(filter) {
+    currentFeedbackFilter = filter;
+    document.querySelectorAll('.fb-pill').forEach(btn => {
+      btn.classList.remove('bg-slate-900', 'text-white');
+      btn.classList.add('bg-white', 'border', 'border-slate-200', 'text-slate-600');
+    });
+    const active = document.getElementById(`fb-filter-${filter}`);
+    if (active) {
+      active.classList.remove('bg-white', 'border', 'border-slate-200', 'text-slate-600');
+      active.classList.add('bg-slate-900', 'text-white');
+    }
+    renderFeedbackCards();
+  }
+
+  function renderFeedbackCards() {
+    const container = document.getElementById('feedback-cards-list');
+    if (!container) return;
+
+    const filtered = state.leads.filter(l => currentFeedbackFilter === 'ALL' || l.feedbackStatus === currentFeedbackFilter);
+    if (filtered.length === 0) {
+      container.innerHTML = `<div class="col-span-full bg-white rounded-2xl border border-slate-200 p-10 text-center text-sm text-slate-400">No leads under this feedback filter.</div>`;
+      return;
+    }
+
+    container.innerHTML = filtered.map(lead => {
+      let badgeClass = 'bg-amber-50 text-amber-700 border-amber-200';
+      if (lead.feedbackStatus === 'Accepted / Bound') badgeClass = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      if (lead.feedbackStatus === 'Disputed / Replacement') badgeClass = 'bg-rose-50 text-rose-700 border-rose-200';
+
+      const commentsHtml = (lead.clientComments && lead.clientComments.length)
+        ? lead.clientComments.map(c => `
+            <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/80 text-xs space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-slate-800">${escapeHtml(c.author)}</span>
+                <span class="text-[11px] text-slate-400">${escapeHtml(c.time)}</span>
+              </div>
+              <p class="text-slate-700 leading-relaxed">${escapeHtml(c.text)}</p>
+            </div>
+          `).join('')
+        : `<p class="text-xs text-slate-400 italic py-2">No comments posted by client yet.</p>`;
+
+      return `
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col justify-between space-y-4">
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <div class="flex items-center gap-2">
+                  <h3 class="font-bold text-slate-900 text-base">${escapeHtml(lead.name)}</h3>
+                  <span class="font-mono text-xs text-slate-500">${escapeHtml(lead.phone)}</span>
+                </div>
+                <p class="text-xs text-slate-500 mt-0.5">Sent to <strong class="text-indigo-600">${escapeHtml(lead.agentName)}</strong> • ${escapeHtml(lead.state)} • ${escapeHtml(lead.timestamp)}</p>
+              </div>
+              <select onchange="updateFeedbackStatus('${lead.id}', this.value)" class="rounded-lg border px-2.5 py-1 text-xs font-bold ${badgeClass} focus:outline-none cursor-pointer">
+                <option value="Pending Review" ${lead.feedbackStatus === 'Pending Review' ? 'selected' : ''}>Pending Review</option>
+                <option value="Accepted / Bound" ${lead.feedbackStatus === 'Accepted / Bound' ? 'selected' : ''}>Accepted / Bound</option>
+                <option value="Disputed / Replacement" ${lead.feedbackStatus === 'Disputed / Replacement' ? 'selected' : ''}>Disputed / Replacement</option>
+              </select>
+            </div>
+            <div class="space-y-2 max-h-44 overflow-y-auto pr-1">${commentsHtml}</div>
+          </div>
+          <div class="pt-3 border-t border-slate-100 flex gap-2">
+            <input type="text" id="comment-input-${lead.id}" placeholder="Log client comment or verifier reply..." class="flex-grow rounded-xl border border-slate-300 px-3 py-2 text-xs focus:border-indigo-500 focus:outline-none">
+            <button onclick="addLeadComment('${lead.id}')" class="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shrink-0 cursor-pointer">Post</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function updateFeedbackStatus(leadId, newStatus) {
+    const lead = state.leads.find(l => l.id === leadId);
+    if (!lead) return;
+    lead.feedbackStatus = newStatus;
+    refreshAllUI();
+    await saveState(true);
+    showToast(`Updated ${lead.name} status to "${newStatus}".`, 'info');
+  }
+
+  async function addLeadComment(leadId) {
+    const input = document.getElementById(`comment-input-${leadId}`);
+    const text = input?.value.trim();
+    if (!text) return;
+    const lead = state.leads.find(l => l.id === leadId);
+    if (!lead) return;
+    if (!lead.clientComments) lead.clientComments = [];
+    lead.clientComments.push({ author: 'Daily Lead Log Desk', time: 'Just now', text });
+    input.value = '';
+    refreshAllUI();
+    await saveState(true);
+    showToast('Comment saved & synced to Google Drive.', 'success');
+  }
+
+  function renderInvoicesTable() {
+    const tbody = document.getElementById('invoices-tbody');
+    if (!tbody) return;
+
+    const unpaidOrUnconfirmed = state.invoices.filter(i => i.status !== 'Paid' || i.confirmationStatus === 'Awaiting Confirmation');
+    const unpaidOnly = state.invoices.filter(i => i.status !== 'Paid');
+    const overdueInvs = state.invoices.filter(i => i.status === 'Overdue');
+    const confirmedPaidInvs = state.invoices.filter(i => i.status === 'Paid' && i.confirmationStatus === 'Confirmed by Daily Lead Log');
+
+    const pendingTotal = unpaidOnly.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    const overdueTotal = overdueInvs.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    const paidTotal = confirmedPaidInvs.reduce((s, i) => s + (Number(i.total) || 0), 0);
+    const unbilledLeads = state.leads.filter(l => l.status === 'Transferred' && !l.billed && l.feedbackStatus !== 'Disputed / Replacement');
+    const unbilledTotal = unbilledLeads.reduce((s, l) => s + (Number(l.rate) || 30), 0);
+
+    document.getElementById('inv-kpi-pending').textContent = `$${pendingTotal.toFixed(2)}`;
+    document.getElementById('inv-kpi-pending-count').textContent = `Across ${unpaidOrUnconfirmed.length} open / awaiting confirmation`;
+    document.getElementById('inv-kpi-overdue').textContent = `$${overdueTotal.toFixed(2)}`;
+    document.getElementById('inv-kpi-overdue-count').textContent = `${overdueInvs.length} overdue invoice(s)`;
+    document.getElementById('inv-kpi-paid').textContent = `$${paidTotal.toFixed(2)}`;
+    document.getElementById('inv-kpi-unbilled').textContent = `${unbilledLeads.length} Leads ($${unbilledTotal})`;
+
+    if (state.invoices.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" class="py-10 text-center text-slate-400 text-sm">No invoices created yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = state.invoices.map(inv => {
+      let statusPill = 'bg-amber-50 text-amber-700 border-amber-200';
+      if (inv.status === 'Overdue') statusPill = 'bg-rose-50 text-rose-700 border-rose-200';
+      if (inv.status === 'Paid' && inv.confirmationStatus === 'Confirmed by Daily Lead Log') statusPill = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+
+      const isConfirmed = inv.status === 'Paid' && inv.confirmationStatus === 'Confirmed by Daily Lead Log';
+      const isAwaitingConfirm = inv.confirmationStatus === 'Awaiting Confirmation';
+
+      return `
+        <tr class="hover:bg-slate-50/80 transition-colors">
+          <td class="py-3.5 px-4 font-mono text-xs font-bold text-slate-900">${escapeHtml(inv.id)}</td>
+          <td class="py-3.5 px-4 font-bold text-slate-900">${escapeHtml(inv.clientName)}</td>
+          <td class="py-3.5 px-4 text-xs text-slate-600">${escapeHtml(inv.period)}</td>
+          <td class="py-3.5 px-4 text-xs font-semibold text-slate-800">${inv.leadCount} Leads @ $${inv.rate}</td>
+          <td class="py-3.5 px-4 font-extrabold text-slate-900">$${Number(inv.total || 0).toFixed(2)}</td>
+          <td class="py-3.5 px-4 text-xs text-slate-600">${escapeHtml(inv.dueDate)}</td>
+          <td class="py-3.5 px-4">
+            <span class="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusPill}">${escapeHtml(inv.status)}</span>
+            <p class="text-[11px] text-slate-500 mt-1">${escapeHtml(inv.confirmationStatus || 'Not Paid Yet')}</p>
+            ${inv.confirmationRef ? `<p class="text-[10px] font-mono text-slate-400">Ref: ${escapeHtml(inv.confirmationRef)}</p>` : ''}
+          </td>
+          <td class="py-3.5 px-4 text-right space-x-1.5">
+            <button onclick="viewInvoiceDetails('${inv.id}')" class="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer">View / Copy</button>
+            ${!isConfirmed ? `<button onclick="markInvoicePaid('${inv.id}')" class="px-2.5 py-1.5 rounded-lg ${isAwaitingConfirm ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white text-xs font-semibold cursor-pointer">${isAwaitingConfirm ? 'Confirm Payment' : 'Mark Paid'}</button>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function markInvoicePaid(invId) {
+    const inv = state.invoices.find(i => i.id === invId);
+    if (!inv) return;
+    inv.status = 'Paid';
+    inv.confirmationStatus = 'Confirmed by Daily Lead Log';
+    inv.confirmedAt = new Date().toISOString();
+    refreshAllUI();
+    await saveState(true);
+    showToast(`Invoice ${inv.id} confirmed as PAID & synced to Client Portal!`, 'success');
+  }
+
+  function viewInvoiceDetails(invId) {
+    const inv = state.invoices.find(i => i.id === invId);
+    if (!inv) return;
+    const summaryText = `INVOICE ${inv.id} — DAILY LEAD LOG (dailyleadlog.com)\nClient: ${inv.clientName}\nPeriod: ${inv.period}\nStatus: ${inv.status} (${inv.confirmationStatus || 'Not Paid Yet'})\nDue Date: ${inv.dueDate}\n----------------------------------\n${(inv.items || []).join('\n')}\n----------------------------------\nTOTAL DUE: $${Number(inv.total || 0).toFixed(2)}`;
+
+    document.getElementById('invoice-modal-title').textContent = `Invoice ${inv.id} — ${inv.clientName}`;
+    document.getElementById('invoice-modal-body').innerHTML = `
+      <textarea id="inv-copy-box" readonly rows="9" class="w-full rounded-xl bg-slate-50 border border-slate-200 p-3.5 font-mono text-xs text-slate-800">${escapeHtml(summaryText)}</textarea>
+      <div class="flex justify-end gap-2">
+        <button onclick="closeModal('invoice-modal')" class="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700 cursor-pointer">Close</button>
+        <button onclick="copyTextarea('inv-copy-box')" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer">Copy Invoice Reminder</button>
+      </div>
+    `;
+    document.getElementById('invoice-modal').classList.remove('hidden');
+  }
+
+  function openGenerateInvoiceModal() {
+    const unbilledLeads = state.leads.filter(l => l.status === 'Transferred' && !l.billed && l.feedbackStatus !== 'Disputed / Replacement');
+    if (unbilledLeads.length === 0) {
+      showToast('All eligible transferred leads have already been invoiced.', 'info');
+      return;
+    }
+
+    const byClient = {};
+    unbilledLeads.forEach(l => {
+      if (!byClient[l.agentId]) byClient[l.agentId] = { agentId: l.agentId, agentName: l.agentName, leads: [], rate: l.rate || 30 };
+      byClient[l.agentId].leads.push(l);
+    });
+
+    const groups = Object.values(byClient);
+    document.getElementById('invoice-modal-title').textContent = 'Generate Invoices from Unbilled Transfers';
+    document.getElementById('invoice-modal-body').innerHTML = `
+      <p class="text-xs text-slate-600">The following clients have unbilled transferred leads ready to invoice:</p>
+      <div class="space-y-2.5">
+        ${groups.map(g => {
+          const total = g.leads.reduce((s, l) => s + (Number(l.rate) || g.rate), 0);
+          return `
+            <div class="p-3.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div>
+                <p class="font-bold text-sm text-slate-900">${escapeHtml(g.agentName)}</p>
+                <p class="text-xs text-slate-500">${g.leads.length} unbilled lead(s): ${g.leads.map(x => x.name).join(', ')}</p>
+              </div>
+              <div class="text-right">
+                <p class="font-extrabold text-indigo-700 text-base">$${total.toFixed(2)}</p>
+                <button onclick="createInvoiceForClient('${g.agentId}')" class="mt-1 px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold cursor-pointer">Create Invoice</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+    document.getElementById('invoice-modal').classList.remove('hidden');
+  }
+
+  async function createInvoiceForClient(agentId) {
+    const unbilled = state.leads.filter(l => l.agentId === agentId && l.status === 'Transferred' && !l.billed && l.feedbackStatus !== 'Disputed / Replacement');
+    if (unbilled.length === 0) return;
+
+    const agent = state.agents.find(a => a.id === agentId);
+    const rate = agent?.ratePerLead || 30;
+    const total = unbilled.reduce((s, l) => s + (Number(l.rate) || rate), 0);
+    unbilled.forEach(l => l.billed = true);
+
+    const newInv = {
+      id: 'INV-2026-' + (100 + state.invoices.length),
+      clientId: agentId,
+      clientName: agent ? agent.name : unbilled[0].agentName,
+      period: 'Nov 26, 2026 (Daily Batch)',
+      leadCount: unbilled.length,
+      rate,
+      total,
+      dueDate: 'Dec 03, 2026',
+      status: 'Pending',
+      confirmationStatus: 'Not Paid Yet',
+      confirmedAt: null,
+      confirmationRef: null,
+      paymentMethod: null,
+      clientNote: null,
+      items: unbilled.map(l => `${l.id} (${l.name} - ${l.phone}) - $${l.rate || rate}`)
+    };
+
+    state.invoices.unshift(newInv);
+    refreshAllUI();
+    await saveState(true);
+    closeModal('invoice-modal');
+    showToast(`Generated ${newInv.id} ($${total.toFixed(2)}) for ${newInv.clientName}!`, 'success');
+  }
+
+  function renderSettingsAgentsList() {
+    const container = document.getElementById('settings-agent-list');
+    if (!container) return;
+
+    if (state.agents.length === 0) {
+      container.innerHTML = `
+        <div class="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-2">
+          <p class="text-sm font-bold text-slate-900">No clients added yet</p>
+          <p class="text-xs text-slate-500">Use the form on the left to add your first client one by one. Every client you save syncs directly to <code class="font-mono">dailyleadlog_db.json</code> in Google Drive.</p>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = state.agents.map(agent => `
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="font-bold text-slate-900 text-base">${escapeHtml(agent.name)}</h3>
+            ${agent.agency ? `<span class="px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600">${escapeHtml(agent.agency)}</span>` : ''}
+            ${agent.states.map(s => `<span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">${escapeHtml(s)}</span>`).join('')}
+            <span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-slate-100 text-slate-700">Cap: ${agent.dailyCap}/day</span>
+            <span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-700">Cool: ${agent.coolDownMinutes}m</span>
+            <span class="px-2 py-0.5 rounded-md text-xs font-semibold bg-emerald-50 text-emerald-700">$${agent.ratePerLead}/lead</span>
+          </div>
+          <p class="text-xs text-slate-500">Schedule: <strong>${escapeHtml(agent.timings)}</strong>${agent.username || agent.email ? ` • Login: <strong>${escapeHtml(agent.username || agent.email)}</strong>` : ''}</p>
+          <p class="text-xs text-slate-500 font-mono">ID: ${escapeHtml(agent.id)}</p>
+          <p class="text-xs text-slate-800 bg-amber-50/80 border border-amber-200/80 rounded-xl px-3 py-2 font-medium">${escapeHtml(agent.notes)}</p>
+          <div class="flex flex-wrap gap-4 text-xs text-slate-500">
+            <span><strong>Zips:</strong> ${agent.zips.length ? escapeHtml(agent.zips.join(', ')) : 'All'}</span>
+            <span><strong>DNC:</strong> ${agent.dnc.length ? escapeHtml(agent.dnc.join(', ')) : 'None'}</span>
+          </div>
+        </div>
+        <div class="flex sm:flex-col gap-2 shrink-0">
+          <button onclick="editAgentSetting('${agent.id}')" class="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer">Edit</button>
+          <button onclick="deleteAgentSetting('${agent.id}')" class="px-3 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-xs font-semibold text-rose-600 cursor-pointer">Remove</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function saveAgentSetting(e) {
+    e.preventDefault();
+    const editId = document.getElementById('edit-agent-id').value;
+    const name = document.getElementById('setting-agent-name').value.trim();
+    const agency = document.getElementById('setting-agent-agency').value.trim();
+    const loginInput = document.getElementById('setting-agent-username').value.trim();
+    const password = document.getElementById('setting-agent-password').value;
+    const states = document.getElementById('setting-agent-states').value.split(',').map(s => s.trim()).filter(Boolean);
+    const dailyCap = parseInt(document.getElementById('setting-agent-cap').value, 10) || 6;
+    const coolDownMinutes = parseInt(document.getElementById('setting-agent-cool').value, 10) || 2;
+    const ratePerLead = parseInt(document.getElementById('setting-agent-rate').value, 10) || 30;
+    const timings = document.getElementById('setting-agent-timings').value.trim();
+    const notes = document.getElementById('setting-agent-notes').value.trim();
+    const zips = document.getElementById('setting-agent-zips').value.split(',').map(z => z.trim()).filter(Boolean);
+    const dnc = document.getElementById('setting-agent-dnc').value.split(',').map(d => d.trim()).filter(Boolean);
+
+    const isEmail = loginInput.includes('@');
+    const username = isEmail ? (loginInput.split('@')[0] || loginInput) : loginInput;
+    const email = isEmail ? loginInput : (loginInput ? `${loginInput}@dailyleadlog.com` : '');
+
+    if (editId) {
+      const idx = state.agents.findIndex(a => a.id === editId);
+      if (idx !== -1) {
+        const existing = state.agents[idx];
+        state.agents[idx] = {
+          ...existing,
+          name,
+          agency: agency || existing.agency || '',
+          username: loginInput ? username : existing.username,
+          email: loginInput ? email : existing.email,
+          password: password ? password : existing.password,
+          states,
+          dailyCap,
+          coolDownMinutes,
+          ratePerLead,
+          timings,
+          notes,
+          zips,
+          dnc
+        };
+        showToast(`Updated client: ${name}`, 'success');
+      }
+    } else {
+      const newAgent = {
+        id: crypto.randomUUID ? crypto.randomUUID() : 'ag-' + Date.now(),
+        name,
+        agency,
+        username,
+        email,
+        password,
+        states,
+        notes,
+        zips,
+        dnc,
+        status: 'Active',
+        statusNote: 'Ready for live transfers',
+        dailyCap,
+        leadsSentToday: 0,
+        oneTimeUnlimitedToday: false,
+        coolDownMinutes,
+        coolDownEndTime: null,
+        timings,
+        inScheduleWindow: true,
+        ratePerLead
+      };
+      state.agents.push(newAgent);
+      state.selectedAgentId = newAgent.id;
+      showToast(`Added client: ${name}`, 'success');
+    }
+
+    resetSettingsForm();
+    refreshAllUI();
+    calculateAge();
+    checkDncName();
+    validateStateMatch();
+    await saveState(true);
+  }
+
+  function editAgentSetting(id) {
+    const agent = state.agents.find(a => a.id === id);
+    if (!agent) return;
+    document.getElementById('settings-form-title').textContent = `Edit Client: ${agent.name}`;
+    document.getElementById('cancel-edit-btn').classList.remove('hidden');
+    document.getElementById('edit-agent-id').value = agent.id;
+    document.getElementById('setting-agent-name').value = agent.name;
+    document.getElementById('setting-agent-agency').value = agent.agency || '';
+    document.getElementById('setting-agent-username').value = agent.username || agent.email || '';
+    document.getElementById('setting-agent-password').value = agent.password || '';
+    document.getElementById('setting-agent-states').value = agent.states.join(', ');
+    document.getElementById('setting-agent-cap').value = agent.dailyCap;
+    document.getElementById('setting-agent-cool').value = agent.coolDownMinutes;
+    document.getElementById('setting-agent-rate').value = agent.ratePerLead;
+    document.getElementById('setting-agent-timings').value = agent.timings;
+    document.getElementById('setting-agent-notes').value = agent.notes;
+    document.getElementById('setting-agent-zips').value = agent.zips.join(', ');
+    document.getElementById('setting-agent-dnc').value = agent.dnc.join(', ');
+  }
+
+  async function deleteAgentSetting(id) {
+    state.agents = state.agents.filter(a => a.id !== id);
+    if (state.selectedAgentId === id) state.selectedAgentId = state.agents.length > 0 ? state.agents[0].id : '';
+    refreshAllUI();
+    await saveState(true);
+    showToast('Client removed & synced to Google Drive.', 'info');
+  }
+
+  function resetSettingsForm() {
+    document.getElementById('settings-form-title').textContent = 'Add New Client Account';
+    document.getElementById('cancel-edit-btn').classList.add('hidden');
+    document.getElementById('edit-agent-id').value = '';
+    document.getElementById('setting-agent-name').value = '';
+    document.getElementById('setting-agent-agency').value = '';
+    document.getElementById('setting-agent-username').value = '';
+    document.getElementById('setting-agent-password').value = '';
+    document.getElementById('setting-agent-states').value = '';
+    document.getElementById('setting-agent-cap').value = 6;
+    document.getElementById('setting-agent-cool').value = 2;
+    document.getElementById('setting-agent-rate').value = 30;
+    document.getElementById('setting-agent-timings').value = '09:00 AM - 06:00 PM CST';
+    document.getElementById('setting-agent-notes').value = '';
+    document.getElementById('setting-agent-zips').value = '';
+    document.getElementById('setting-agent-dnc').value = '';
+  }
+
+  function formatLeadSummary(lead) {
+    return `=== DAILY LEAD LOG TRANSFER SUMMARY (dailyleadlog.com) ===
+Status: ${lead.status.toUpperCase()} | ID: ${lead.id}
+Receiving Client: ${lead.agentName}${lead.reassignHistory ? `\nNote: ${lead.reassignHistory}` : ''}
+----------------------------------------
+LEAD INFO
+Name: ${lead.name}
+Phone: ${lead.phone} (TCPA: Clean)
+DOB: ${lead.dob || 'N/A'}${lead.age ? ` (Age: ${lead.age})` : ''}
+Address: ${lead.address || 'N/A'}
+State: ${lead.state}
+Spouse: ${lead.spouse}
+----------------------------------------
+AUTO & HOME INFO
+Current Auto Carrier: ${lead.autoCarrier || 'None'}
+Any Lapses: ${lead.lapses}
+Make & Model: ${lead.vehicle || 'N/A'}
+Accidents / Tickets: ${lead.accidents} / ${lead.tickets}
+Home Owner: ${lead.homeOwner} (${lead.homeType})
+Current Home Carrier: ${lead.homeCarrier || 'None'}
+Claims (Past 3 Yrs): ${lead.claims}
+========================================`;
+  }
+
+  function openSummaryModal(lead) {
+    document.getElementById('modal-title').textContent = `${lead.status} Summary — ${lead.name}`;
+    document.getElementById('modal-summary-text').value = formatLeadSummary(lead);
+    document.getElementById('summary-modal').classList.remove('hidden');
+  }
+
+  function viewLeadSummary(leadId) {
+    const lead = state.leads.find(l => l.id === leadId);
+    if (lead) openSummaryModal(lead);
+  }
+
+  function closeModal(modalId) {
+    document.getElementById(modalId).classList.add('hidden');
+  }
+
+  function copyTextarea(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    el.select();
+    el.setSelectionRange(0, 99999);
+    try {
+      document.execCommand('copy');
+      showToast('Copied to clipboard!', 'success');
+    } catch (e) {
+      showToast('Press Ctrl+C to copy.', 'warning');
+    }
+  }
+
+  function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    const colors = {
+      success: 'bg-navy-900 text-white border-emerald-500',
+      error: 'bg-rose-600 text-white border-rose-900',
+      warning: 'bg-amber-500 text-white border-amber-800',
+      info: 'bg-slate-800 text-white border-indigo-500'
+    };
+    toast.className = `pointer-events-auto flex items-center gap-2 px-4 py-3 rounded-xl shadow-xl border-l-4 text-xs font-semibold animate-fade-in ${colors[type] || colors.info}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transition = 'opacity 0.25s ease';
+      setTimeout(() => toast.remove(), 250);
+    }, 3400);
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+</script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
