@@ -1738,6 +1738,7 @@ async function handleAdminLogin(e) {
             renderAgentInfoCard();
             checkDncName();
             validateStateMatch();
+            checkPhoneStatus();
         }
 
         function renderAgentInfoCard() {
@@ -1841,32 +1842,95 @@ async function handleAdminLogin(e) {
                 : `<span class="text-xs text-slate-500">No restricted persons listed.</span>`;
         }
 
-        function checkPhoneStatus(manualClick = false) {
-            const raw = document.getElementById('lead-phone').value.replace(/\D/g, '');
-            const historyBadge = document.getElementById('transfer-history-badge');
-            const tcpaBadge = document.getElementById('tcpa-badge');
+function checkPhoneStatus(manualClick = false) {
+    const phoneInput = document.getElementById('lead-phone');
+    const raw = phoneInput.value.replace(/\D/g, '');
+    const historyBadge = document.getElementById('transfer-history-badge');
+    const tcpaBadge = document.getElementById('tcpa-badge');
+    const dupAlert = document.getElementById('duplicate-lead-alert');
+    const selectedAgent = state.agents.find(a => a.id === state.selectedAgentId);
 
-            const existing = state.leads.find(l => l.phone.replace(/\D/g, '') === raw && raw.length >= 7);
-            if (existing) {
-                historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200';
-                historyBadge.textContent = `Logged: ${existing.status} (${existing.agentName})`;
-            } else {
-                historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200';
-                historyBadge.textContent = 'No transfer found.';
-            }
+    // Find ALL previous submissions for this phone number (last 10 digits match)
+    const normalizedTarget = raw.length >= 10 ? raw.slice(-10) : raw;
+    const matches = normalizedTarget.length >= 7
+        ? state.leads.filter(l => {
+            const leadDigits = (l.phone || '').replace(/\D/g, '');
+            const normalizedLead = leadDigits.length >= 10 ? leadDigits.slice(-10) : leadDigits;
+            return normalizedLead === normalizedTarget;
+        })
+        : [];
 
-            if (raw.endsWith('0000') && raw.length >= 7) {
-                tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
-                tcpaBadge.textContent = 'TCPA: Litigator Alert';
-            } else {
-                tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
-                tcpaBadge.textContent = 'TCPA: clean';
-            }
+    if (matches.length > 0) {
+        const latest = matches[0];
+        const sameClientMatch = selectedAgent
+            ? matches.find(m => m.agentId === selectedAgent.id || m.agentName === selectedAgent.name)
+            : null;
 
-            if (manualClick) {
-                showToast(raw.length >= 10 ? 'Scrubber verified: TCPA Clean.' : 'Enter a valid 10-digit phone number.', raw.length >= 10 ? 'success' : 'warning');
-            }
+        // Update small pill badge
+        historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
+        historyBadge.textContent = sameClientMatch
+            ? `Already sent to ${sameClientMatch.agentName}!`
+            : `Submitted (${matches.length}x) → ${latest.agentName}`;
+
+        // Highlight phone input border
+        phoneInput.classList.remove('border-slate-300');
+        phoneInput.classList.add('border-amber-400', 'bg-amber-50/30');
+
+        // Build detailed alert banner
+        const historyLines = matches.map(m =>
+            `<li class="flex flex-wrap items-center justify-between gap-2 py-1 border-b last:border-b-0 border-current/10">
+                <span><strong>${escapeHtml(m.agentName)}</strong> — Lead: <em>${escapeHtml(m.name)}</em> (${escapeHtml(m.status)})</span>
+                <span class="font-mono text-[11px] opacity-80">${escapeHtml(m.timestamp || 'Logged')} • ${escapeHtml(m.id)}</span>
+            </li>`
+        ).join('');
+
+        if (sameClientMatch) {
+            dupAlert.className = 'mt-2.5 rounded-xl border border-rose-300 bg-rose-50 text-rose-900 p-3 text-xs space-y-1.5 animate-fade-in';
+            dupAlert.innerHTML = `
+                <div class="flex items-center gap-1.5 font-bold text-rose-700">
+                    <span class="material-symbols-outlined text-[18px]">warning</span>
+                    <span>DUPLICATE FOR THIS CLIENT: Already submitted to ${escapeHtml(sameClientMatch.agentName)}!</span>
+                </div>
+                <ul class="pl-1">${historyLines}</ul>
+            `;
+        } else {
+            dupAlert.className = 'mt-2.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 p-3 text-xs space-y-1.5 animate-fade-in';
+            dupAlert.innerHTML = `
+                <div class="flex items-center gap-1.5 font-bold text-amber-800">
+                    <span class="material-symbols-outlined text-[18px] text-amber-600">history</span>
+                    <span>Previous Submission Found — Already submitted to ${escapeHtml(latest.agentName)}:</span>
+                </div>
+                <ul class="pl-1">${historyLines}</ul>
+            `;
         }
+        dupAlert.classList.remove('hidden');
+    } else {
+        historyBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200';
+        historyBadge.textContent = 'No transfer found.';
+        phoneInput.classList.remove('border-amber-400', 'bg-amber-50/30');
+        phoneInput.classList.add('border-slate-300');
+        if (dupAlert) {
+            dupAlert.classList.add('hidden');
+            dupAlert.innerHTML = '';
+        }
+    }
+
+    if (raw.endsWith('0000') && raw.length >= 7) {
+        tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200';
+        tcpaBadge.textContent = 'TCPA: Litigator Alert';
+    } else {
+        tcpaBadge.className = 'inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200';
+        tcpaBadge.textContent = 'TCPA: clean';
+    }
+
+    if (manualClick) {
+        if (matches.length > 0) {
+            showToast(`Alert: Number already submitted to ${matches[0].agentName}!`, 'warning');
+        } else {
+            showToast(raw.length >= 10 ? 'No previous submissions found. TCPA Clean.' : 'Enter a valid 10-digit phone number.', raw.length >= 10 ? 'success' : 'warning');
+        }
+    }
+}
 
         function checkDncName() {
             const nameVal = document.getElementById('lead-name').value.trim().toLowerCase();
